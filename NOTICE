@@ -1,0 +1,46 @@
+rivet-ac3 — an AC-3 / E-AC-3 decoder
+Copyright 2026 Ely Erin Fox
+
+This product is licensed under the Open Encoding Attribution License,
+Version 1.0 (see LICENSE.md). It is source-available, not open source: the
+attribution duty in §5 applies to commercial use; §4 requires this NOTICE to
+be carried forward with any distribution.
+
+------------------------------------------------------------------------------
+Provenance
+------------------------------------------------------------------------------
+
+The decoder is an original implementation written from ATSC A/52:2018
+(Digital Audio Compression (AC-3, E-AC-3) Standard), including its Annex E.
+It is not a translation of, and does not derive from, any other AC-3 or
+E-AC-3 decoder's source. The normative tables in src/tables.rs were
+transcribed from the A/52:2018 PDF — the large ones extracted from its text
+layer with an element-count check per table, the small ones typed in — and
+each names the spec table and PDF page it came from. None was taken from
+libavcodec or any other implementation.
+
+The decoder is verified against libavcodec's decoder, used only as a black
+box (the ffmpeg command-line tool, whose PCM output is compared); none of its
+code is included or was consulted. The committed test stream in tests/data
+was made by ffmpeg's AC-3 encoder, run the same way, and its reference PCM
+by ffmpeg's decoder; they are tool output only.
+
+------------------------------------------------------------------------------
+Patents and trademarks
+------------------------------------------------------------------------------
+
+AC-3 and E-AC-3 may be subject to patent licensing in some jurisdictions.
+This licence grants no rights under any patent, and the authors make no claim
+about whether a licence is needed for any use.
+
+Dolby, Dolby Digital and Dolby Digital Plus are trademarks of Dolby
+Laboratories. This project is not affiliated with or endorsed by Dolby
+Laboratories; the names are used only to say which format it decodes.
+
+------------------------------------------------------------------------------
+Third-party components
+------------------------------------------------------------------------------
+
+thiserror (https://crates.io/crates/thiserror) — MIT OR Apache-2.0
+tracing (https://crates.io/crates/tracing), optional (the `tracing` feature) — MIT
+tracing-subscriber (https://crates.io/crates/tracing-subscriber), development dependency only (examples) — MIT
