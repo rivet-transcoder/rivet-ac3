@@ -311,6 +311,8 @@ pub struct FrameDecoder {
     dith_offsets: [Option<usize>; 6],
     feat: Features,
     mixed_blksw: Vec<u64>,
+    block_bits: [(usize, usize); 6],
+    all_substreams: bool,
 }
 
 /// Coding tools a stream has exercised so far, counted by
@@ -454,6 +456,8 @@ impl FrameDecoder {
             dith_offsets: [None; 6],
             feat: Features::default(),
             mixed_blksw: Vec::new(),
+            block_bits: [(0, 0); 6],
+            all_substreams: false,
         }
     }
 
@@ -487,6 +491,24 @@ impl FrameDecoder {
     pub fn dithflag_bit_offsets(&self) -> &[Option<usize>] {
         let n = self.last.map_or(0, |h| h.numblks);
         &self.dith_offsets[..n]
+    }
+
+    /// For each audio block of the syncframe last decoded: the bit offset
+    /// (from the syncword) where its mantissas begin and where the block
+    /// ends. The last block's end is where `auxdata` begins. Diagnostic: the
+    /// encoder's tests check the §5.5 placement rules and the padding with it.
+    pub fn block_bit_ranges(&self) -> &[(usize, usize)] {
+        let n = self.last.map_or(0, |h| h.numblks);
+        &self.block_bits[..n]
+    }
+
+    /// Diagnostic switch: decode E-AC-3 dependent substreams and independent
+    /// substreams other than 0 as programmes of their own (their own
+    /// `acmod` / `lfeon`) instead of skipping them. Off by default; with it
+    /// on, give each substream its own `FrameDecoder`. The encoder's tests
+    /// use it to check the 7.1 dependent substream.
+    pub fn set_decode_all_substreams(&mut self, enabled: bool) {
+        self.all_substreams = enabled;
     }
 
     /// Which coding tools the stream has exercised so far.
@@ -544,7 +566,7 @@ impl FrameDecoder {
         if data.len() < hdr.frame_len {
             return Err(err(format!("ac3: frame needs {} bytes, got {}", hdr.frame_len, data.len())));
         }
-        if hdr.eac3 && (hdr.strmtyp == 1 || hdr.substreamid != 0) {
+        if hdr.eac3 && (hdr.strmtyp == 1 || hdr.substreamid != 0) && !self.all_substreams {
             #[cfg(feature = "tracing")]
             tracing::trace!(
                 strmtyp = hdr.strmtyp,
@@ -1192,6 +1214,7 @@ impl FrameDecoder {
                 &self.chans[LFE].bap[..7]);
         }
         // --- mantissas --------------------------------------------------------
+        self.block_bits[blk].0 = br.pos();
         for c in &mut self.chans {
             c.coeffs = [0.0; NB];
         }
@@ -1236,6 +1259,7 @@ impl FrameDecoder {
                 self.apply_aht_block(LFE, blk, 0, 7, false);
             }
         }
+        self.block_bits[blk].1 = br.pos();
         // --- decoupling (§7.4.3) ----------------------------------------------
         if f.cplinu {
             // expand band coordinates / phase flags to sub-bands
@@ -1763,7 +1787,7 @@ pub(super) fn dynrng_gain(dynrng: u8) -> f32 {
 /// Internal channel indices in output order: fronts as FL FR FC, then LFE,
 /// then the surround(s) — ffmpeg's native order for each layout, which is
 /// what `channelmap` and the Opus encoder assume for a channel count.
-fn output_order(acmod: u8, lfeon: bool) -> Vec<usize> {
+pub(crate) fn output_order(acmod: u8, lfeon: bool) -> Vec<usize> {
     let nf = nfchans_for(acmod);
     let mut v: Vec<usize> = match acmod {
         1 => vec![0],
