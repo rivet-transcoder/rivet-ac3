@@ -43,13 +43,10 @@ fn read_wav(bytes: &[u8]) -> Result<Wav, String> {
             b"data" => {
                 let (tag, channels, rate, bits) = fmt.ok_or("data before fmt")?;
                 let samples: Vec<f32> = match (tag, bits) {
-                    (1, 16) => body.chunks_exact(2).map(|c| f32::from(i16::from_le_bytes([c[0], c[1]])) / 32768.0).collect(),
-                    (1, 24) => body
-                        .chunks_exact(3)
-                        .map(|c| (i32::from_le_bytes([0, c[0], c[1], c[2]]) >> 8) as f32 / 8_388_608.0)
-                        .collect(),
-                    (1, 32) => body.chunks_exact(4).map(|c| i32::from_le_bytes(c.try_into().unwrap()) as f32 / 2_147_483_648.0).collect(),
-                    (3, 32) => body.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect(),
+                    (1, 16) => body.as_chunks::<2>().0.iter().map(|c| f32::from(i16::from_le_bytes(*c)) / 32768.0).collect(),
+                    (1, 24) => body.as_chunks::<3>().0.iter().map(|c| (i32::from_le_bytes([0, c[0], c[1], c[2]]) >> 8) as f32 / 8_388_608.0).collect(),
+                    (1, 32) => body.as_chunks::<4>().0.iter().map(|c| i32::from_le_bytes(*c) as f32 / 2_147_483_648.0).collect(),
+                    (3, 32) => body.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect(),
                     _ => return Err(format!("unsupported WAV sample format (tag {tag}, {bits} bits)")),
                 };
                 return Ok(Wav { channels, rate, samples });
