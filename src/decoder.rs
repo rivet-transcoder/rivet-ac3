@@ -18,7 +18,7 @@ use super::tables::{
     GAQ_REMAP_A, GAQ_REMAP_B, HEBAP_MANT_BITS, SPXATTENTAB, SPXBANDTABLE, SYM_QUANT_3,
     SYM_QUANT_5, SYM_QUANT_7, SYM_QUANT_11, SYM_QUANT_15, vq_table,
 };
-use crate::audio::AudioError;
+use crate::Error;
 
 /// Transform coefficients per block.
 const NB: usize = 256;
@@ -67,11 +67,11 @@ impl Header {
     }
 
     /// The speakers this syncframe decodes to, in the order the decoder emits
-    /// them ([`output_order`]): the fronts, the LFE, then the surrounds.
+    /// them (`output_order`): the fronts, the LFE, then the surrounds.
     /// `acmod` 2/1 has one surround behind (FL FR BC), 2/2 and 3/2 a side
     /// pair; dual mono is read as a front pair.
-    pub fn layout(&self) -> crate::audio::filter::ChannelLayout {
-        use crate::audio::filter::ChannelLabel::*;
+    pub fn speakers(&self) -> Vec<crate::Speaker> {
+        use crate::Speaker::*;
         let mut labels = match self.acmod {
             1 => vec![FC],
             0 | 2 | 4 | 6 => vec![FL, FR],
@@ -85,7 +85,7 @@ impl Header {
             6 | 7 => &[SL, SR][..],
             _ => &[][..],
         });
-        crate::audio::filter::ChannelLayout::new(labels).expect("distinct speakers")
+        labels
     }
 }
 
@@ -104,14 +104,14 @@ pub(super) fn nfchans_for(acmod: u8) -> usize {
     }
 }
 
-fn err(msg: impl Into<String>) -> AudioError {
-    AudioError::Decode(msg.into())
+fn err(msg: impl Into<String>) -> Error {
+    Error::Decode(msg.into())
 }
 
 /// Parse `syncinfo()` and the fixed-position fields of `bsi()` — enough to
 /// size the frame and know its layout. The full `bsi` walk happens in
 /// [`FrameDecoder::decode`].
-pub fn parse_header(data: &[u8]) -> Result<Header, AudioError> {
+pub fn parse_header(data: &[u8]) -> Result<Header, Error> {
     if data.len() < 8 {
         return Err(err("ac3: frame shorter than the 8-byte sync header"));
     }
@@ -197,7 +197,7 @@ pub fn parse_header(data: &[u8]) -> Result<Header, AudioError> {
             bitrate_kbps,
         })
     } else {
-        Err(AudioError::Unsupported(format!(
+        Err(Error::Unsupported(format!(
             "ac3: bsid {bsid} — only AC-3 (bsid ≤ 8) and E-AC-3 (bsid 16) are decoded; bsid 9/10 (Annex D reduced sample rate) is not"
         )))
     }
@@ -521,9 +521,7 @@ impl FrameDecoder {
 
     /// Reset the overlap-add history (after a discontinuity).
     pub fn reset(&mut self) {
-        for d in &mut self.delay {
-            *d = [0.0; NB];
-        }
+        self.delay.fill([0.0; NB]);
     }
 
     /// xorshift32 dither source; uniform in (-1, 1).
@@ -541,12 +539,13 @@ impl FrameDecoder {
     /// native channel order for the layout (fronts, LFE, then surrounds).
     /// Returns `Ok(None)` for E-AC-3 substreams other than independent
     /// substream 0, which are skipped per Annex E §3.8.1.
-    pub fn decode(&mut self, data: &[u8], out: &mut Vec<f32>) -> Result<Option<Header>, AudioError> {
+    pub fn decode(&mut self, data: &[u8], out: &mut Vec<f32>) -> Result<Option<Header>, Error> {
         let hdr = parse_header(data)?;
         if data.len() < hdr.frame_len {
             return Err(err(format!("ac3: frame needs {} bytes, got {}", hdr.frame_len, data.len())));
         }
         if hdr.eac3 && (hdr.strmtyp == 1 || hdr.substreamid != 0) {
+            #[cfg(feature = "tracing")]
             tracing::trace!(
                 strmtyp = hdr.strmtyp,
                 substreamid = hdr.substreamid,
@@ -604,7 +603,7 @@ impl FrameDecoder {
     /// Annex E §2.2.3 `audfrm()`.
     // Loops mirror the spec's syntax tables index for index.
     #[allow(clippy::needless_range_loop)]
-    fn parse_audfrm(&mut self, br: &mut BitReader, f: &mut Frame) -> Result<(), AudioError> {
+    fn parse_audfrm(&mut self, br: &mut BitReader, f: &mut Frame) -> Result<(), Error> {
         let hdr = f.hdr;
         let nb = hdr.numblks;
         let (expstre, ahte) = if nb == 6 { (br.read_bit()?, br.read_bit()?) } else { (true, false) };
@@ -719,6 +718,7 @@ impl FrameDecoder {
             let nblkstrtbits = (nb - 1) * (4 + (32 - (words - 1).leading_zeros()) as usize);
             br.skip(nblkstrtbits)?;
         }
+        #[cfg(feature = "tracing")]
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!("audfrm: {:?} expstre {} ahte {} snroffststr {} blkswe {} dithflage {} bamode {} frmfgaincode {} dbaflde {} skipflde {} cplstre {:?} cplinu {:?} cplexpstr {:?} chexpstr {:?} frmcsnr {} frmfsnr {} pos {}",
                 hdr, expstre, ahte, f.snroffststr, f.blkswe, f.dithflage, f.bamode, f.frmfgaincode, f.dbaflde, f.skipflde,
@@ -737,7 +737,7 @@ impl FrameDecoder {
     /// transform coefficients (`Chan::coeffs`).
     // Loops mirror the spec's pseudo-code index for index.
     #[allow(clippy::needless_range_loop)]
-    fn decode_block(&mut self, br: &mut BitReader, f: &mut Frame, blk: usize) -> Result<(), AudioError> {
+    fn decode_block(&mut self, br: &mut BitReader, f: &mut Frame, blk: usize) -> Result<(), Error> {
         let hdr = f.hdr;
         let eac3 = hdr.eac3;
         let nf = hdr.nfchans;
@@ -866,7 +866,7 @@ impl FrameDecoder {
             f.cplinu = if eac3 { f.cplinu_blk[blk] } else { br.read_bit()? };
             if f.cplinu {
                 if eac3 && br.read_bit()? {
-                    return Err(AudioError::Unsupported(
+                    return Err(Error::Unsupported(
                         "eac3: enhanced coupling (ecplinu=1) — not implemented (no cross-check vector: libavcodec refuses it too)".into(),
                     ));
                 }
@@ -1015,6 +1015,7 @@ impl FrameDecoder {
             };
         }
         self.chans[LFE].endmant = 7;
+        #[cfg(feature = "tracing")]
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!("blk {blk} blksw {:?} dith {:?} pos {} cplinu {} cplbegf {} cplendf {} ncplsubnd {} ncplbnd {} phsflginu {} expstr {:?} bwcod {:?} endmant {:?} incpl {:?} rematflg {:?} nrematbd {}",
                 (0..nf).map(|c| self.chans[c].blksw).collect::<Vec<_>>(), (0..nf).map(|c| self.chans[c].dith).collect::<Vec<_>>(), br.pos(), f.cplinu, f.cplbegf, f.cplendf, f.ncplsubnd, f.ncplbnd, f.phsflginu,
@@ -1176,6 +1177,7 @@ impl FrameDecoder {
         }
         // --- bit allocation ---------------------------------------------------
         self.run_bit_allocation(f);
+        #[cfg(feature = "tracing")]
         if tracing::enabled!(tracing::Level::TRACE) {
             tracing::trace!("ba: csnr {} fsnr {:?} fgain {:?} sd/fd/sg/db/fl {:?} nzbap {:?} bap1 {:?} exps0..8 {:?} aht {:?} lfe exps {:?} bap {:?}",
                 f.csnroffst,
@@ -1383,7 +1385,7 @@ impl FrameDecoder {
         start: usize,
         end: usize,
         dither: bool,
-    ) -> Result<(), AudioError> {
+    ) -> Result<(), Error> {
         let dith = dither && self.chans[ch].dith && self.noise_fill;
         self.total_bins += (end - start) as u64;
         for bin in start..end {
@@ -1444,7 +1446,7 @@ impl FrameDecoder {
     /// invert the DCT (§3.4.5) into `Chan::aht[blk][bin]`.
     // Loops mirror the spec's pseudo-code index for index.
     #[allow(clippy::needless_range_loop)]
-    fn read_aht_mantissas(&mut self, br: &mut BitReader, ch: usize, start: usize, end: usize) -> Result<(), AudioError> {
+    fn read_aht_mantissas(&mut self, br: &mut BitReader, ch: usize, start: usize, end: usize) -> Result<(), Error> {
         let gaqmod = br.read(2)? as u8;
         self.feat.aht_channels += 1;
         self.feat.gaq_channels += u64::from(gaqmod != 0);
@@ -1533,6 +1535,7 @@ impl FrameDecoder {
                 }
             }
         }
+        #[cfg(feature = "tracing")]
         if tracing::enabled!(tracing::Level::TRACE) && ch == LFE {
             tracing::trace!("aht lfe: gaqmod {gaqmod} hebap {:?} gains {:?} pre[blk][bin] {:?}",
                 &self.chans[ch].bap[start..end], gains,
@@ -1722,7 +1725,7 @@ fn exp_scale(exp: u8) -> f32 {
 
 /// §7.1.3: decode `ngrps` 7-bit grouped values into absolute exponents.
 /// `out[0] = absexp`, `out[1..=ngrps*3*grpsize]` follow.
-fn decode_exponents(br: &mut BitReader, ngrps: usize, grpsize: usize, absexp: u8, out: &mut [u8]) -> Result<(), AudioError> {
+fn decode_exponents(br: &mut BitReader, ngrps: usize, grpsize: usize, absexp: u8, out: &mut [u8]) -> Result<(), Error> {
     out[0] = absexp;
     let mut prev = i32::from(absexp);
     let mut i = 1usize;
@@ -1777,7 +1780,7 @@ fn output_order(acmod: u8, lfeon: bool) -> Vec<usize> {
 
 /// AC-3 `bsi()` (Table 5.2) after the fixed 8-byte prefix; skips everything
 /// the decoder does not act on.
-fn parse_ac3_bsi(br: &mut BitReader, hdr: &Header) -> Result<(), AudioError> {
+fn parse_ac3_bsi(br: &mut BitReader, hdr: &Header) -> Result<(), Error> {
     br.skip(40)?; // syncinfo
     br.read(5)?; // bsid
     br.read(3)?; // bsmod
@@ -1830,7 +1833,7 @@ fn parse_ac3_bsi(br: &mut BitReader, hdr: &Header) -> Result<(), AudioError> {
 
 /// E-AC-3 `bsi()` (Table E1.2). Everything after the 8 fixed bytes is
 /// metadata this decoder does not act on; it is walked, not interpreted.
-fn parse_eac3_bsi(br: &mut BitReader, hdr: &Header) -> Result<(), AudioError> {
+fn parse_eac3_bsi(br: &mut BitReader, hdr: &Header) -> Result<(), Error> {
     br.skip(16)?; // syncword
     let strmtyp = br.read(2)? as u8;
     br.read(3)?; // substreamid
@@ -2018,24 +2021,26 @@ mod tests {
             dialnorm: 31,
             bitrate_kbps: 448,
         };
-        for (acmod, lfeon, name) in [
-            (7, true, "5.1(side)"),
-            (7, false, "5.0(side)"),
-            (1, false, "mono"),
-            (2, false, "stereo"),
-            (2, true, "2.1"),
-            (3, false, "3.0"),
-            (3, true, "3.1"),
-            (4, false, "3.0(back)"),
-            (5, false, "4.0"),
-            (5, true, "4.1"),
-            (6, false, "quad(side)"),
+        use crate::Speaker::*;
+        for (acmod, lfeon, speakers) in [
+            (7, true, &[FL, FR, FC, LFE, SL, SR][..]),
+            (7, false, &[FL, FR, FC, SL, SR][..]),
+            (1, false, &[FC][..]),
+            (2, false, &[FL, FR][..]),
+            (2, true, &[FL, FR, LFE][..]),
+            (3, false, &[FL, FR, FC][..]),
+            (3, true, &[FL, FR, FC, LFE][..]),
+            (4, false, &[FL, FR, BC][..]),
+            (5, false, &[FL, FR, FC, BC][..]),
+            (5, true, &[FL, FR, FC, LFE, BC][..]),
+            (6, false, &[FL, FR, SL, SR][..]),
         ] {
-            let l = h(acmod, lfeon).layout();
-            assert_eq!(l.to_string(), name, "acmod {acmod} lfe {lfeon}");
+            let l = h(acmod, lfeon).speakers();
+            assert_eq!(l, speakers, "acmod {acmod} lfe {lfeon}");
             assert_eq!(l.len(), output_order(acmod, lfeon).len());
         }
-        assert_eq!(h(4, true).layout().to_string(), "FL+FR+LFE+BC");
+        let names: Vec<String> = h(4, true).speakers().iter().map(ToString::to_string).collect();
+        assert_eq!(names.join("+"), "FL+FR+LFE+BC");
     }
 
     #[test]

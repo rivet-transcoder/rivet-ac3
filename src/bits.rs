@@ -5,7 +5,7 @@
 //! mis-parsed, and silently reading zeros would turn that into plausible
 //! garbage instead of a diagnosable failure.
 
-use crate::audio::AudioError;
+use crate::Error;
 
 pub(super) struct BitReader<'a> {
     data: &'a [u8],
@@ -22,8 +22,8 @@ impl<'a> BitReader<'a> {
         self.pos
     }
 
-    fn overrun(&self, n: u32) -> AudioError {
-        AudioError::Decode(format!(
+    fn overrun(&self, n: u32) -> Error {
+        Error::Decode(format!(
             "ac3: read of {n} bits at bit {} runs past the end of a {}-byte frame",
             self.pos,
             self.data.len()
@@ -31,7 +31,7 @@ impl<'a> BitReader<'a> {
     }
 
     /// Read `n` (≤ 32) bits, MSB first.
-    pub fn read(&mut self, n: u32) -> Result<u32, AudioError> {
+    pub fn read(&mut self, n: u32) -> Result<u32, Error> {
         debug_assert!(n <= 32);
         if n == 0 {
             return Ok(0);
@@ -54,18 +54,18 @@ impl<'a> BitReader<'a> {
         Ok(v as u32)
     }
 
-    pub fn read_bit(&mut self) -> Result<bool, AudioError> {
+    pub fn read_bit(&mut self) -> Result<bool, Error> {
         Ok(self.read(1)? == 1)
     }
 
     /// Read `n` (1..=32) bits as a two's-complement signed value.
-    pub fn read_signed(&mut self, n: u32) -> Result<i32, AudioError> {
+    pub fn read_signed(&mut self, n: u32) -> Result<i32, Error> {
         let v = self.read(n)?;
         let shift = 32 - n;
         Ok(((v << shift) as i32) >> shift)
     }
 
-    pub fn skip(&mut self, n: usize) -> Result<(), AudioError> {
+    pub fn skip(&mut self, n: usize) -> Result<(), Error> {
         if self.pos + n > self.data.len() * 8 {
             return Err(self.overrun(n as u32));
         }

@@ -1560,7 +1560,7 @@ mod tests {
         assert_eq!(WINDOW_TABLE[128], 0.71150);
         assert_eq!(WINDOW_TABLE[255], 1.0);
         // The derived window reproduces every printed value to its 5 decimals.
-        let w = crate::audio::decode::ac3::imdct::kbd_window();
+        let w = crate::imdct::kbd_window();
         for (i, (&t, &d)) in WINDOW_TABLE.iter().zip(w.iter()).enumerate() {
             assert!((t - d).abs() <= 6e-6, "w[{i}] table {t} derived {d}");
         }

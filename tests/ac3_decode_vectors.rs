@@ -1,6 +1,6 @@
-//! Cross-check of the in-tree AC-3 / E-AC-3 decoder against libavcodec.
+//! Cross-check of this crate's AC-3 / E-AC-3 decoder against libavcodec.
 //!
-//! The vectors are made by `crates/codec/tests/data/ac3_make_vectors.sh`
+//! The vectors are made by `tests/data/ac3_make_vectors.sh`
 //! with the real ffmpeg binary: for each case an elementary stream and
 //! libavcodec's f32le decode of it (`<name>.drc1.f32` with dynrng applied,
 //! `<name>.drc0.f32` with `-drc_scale 0`). Point `RIVET_AC3_VECTORS` at that
@@ -23,8 +23,7 @@
 
 use std::path::{Path, PathBuf};
 
-use codec::audio::decode::ac3::{Ac3Decoder, Ac3Options, Features, FrameDecoder, Header, frame_crc_ok, parse_header};
-use codec::audio::AudioDecoder;
+use ac3::{Decoder, Features, FrameDecoder, Header, Options, frame_crc_ok, parse_header};
 
 const LSB16: f32 = 1.0 / 32768.0;
 
@@ -70,12 +69,12 @@ fn compare(ours: &[f32], reference: &[f32], channels: usize, masked: &[u64]) -> 
 
 fn read_f32le(path: &Path) -> Vec<f32> {
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+    bytes.as_chunks::<4>().0.iter().map(|&c| f32::from_le_bytes(c)).collect()
 }
 
 fn read_s16le(path: &Path) -> Vec<f32> {
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    bytes.chunks_exact(2).map(|c| f32::from(i16::from_le_bytes([c[0], c[1]])) / 32768.0).collect()
+    bytes.as_chunks::<2>().0.iter().map(|&c| f32::from(i16::from_le_bytes(c)) / 32768.0).collect()
 }
 
 struct Decoded {
@@ -106,7 +105,7 @@ impl Decoded {
     /// in ffmpeg's native order, then the LFE.
     fn lfe_slot(&self) -> Option<usize> {
         let h = self.header?;
-        h.lfeon.then(|| match h.acmod {
+        h.lfeon.then_some(match h.acmod {
             1 => 1,
             0 | 2 | 4 | 6 => 2,
             _ => 3,
@@ -190,6 +189,7 @@ fn report(name: &str, s: &Stats) -> String {
 ///   rounding plus a 16-bit reference's own rounding.
 /// - peak error ≤ max(8 LSB16, 2.5 × our noise-fill peak): the peaks of two
 ///   independent noises add at most, and rarely coincide.
+///
 /// Everything deterministic in the decode — exponents, bit allocation,
 /// mantissas, coupling, rematrixing, the transform — contributes only
 /// float rounding, so a real bug shows up as a jump far beyond either bound
@@ -269,28 +269,30 @@ fn committed_5_1_fixture_matches_libavcodec() {
     check("ac3_51_448k (s16 ref)", &s, &noise, &ours);
 }
 
-/// The `AudioDecoder` adapter must produce the same PCM as the frame
-/// decoder when the stream arrives as arbitrary packet boundaries.
+/// The stream `Decoder` must produce the same PCM as the frame decoder when
+/// the stream arrives as arbitrary chunk boundaries.
 #[test]
-fn audio_decoder_adapter_reassembles_split_frames() {
+fn stream_decoder_reassembles_split_frames() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data");
     let es = std::fs::read(dir.join("ac3_51_448k.ac3")).expect("fixture");
     let direct = decode_es(&es, 1.0, true).pcm;
-    let mut dec = Ac3Decoder::with_options(48_000, 6, Ac3Options { drc_scale: 1.0 }).unwrap();
+    let mut dec = Decoder::with_options(Options { drc_scale: 1.0 });
     let mut out = Vec::new();
-    let mut pts_seen = Vec::new();
-    for (i, chunk) in es.chunks(1000).enumerate() {
-        for f in dec.decode(chunk, if i == 0 { 5_000 } else { 0 }).unwrap() {
+    let mut frames = 0;
+    for chunk in es.chunks(1000) {
+        for f in dec.decode(chunk).unwrap() {
             assert_eq!(f.channels, 6);
             assert_eq!(f.sample_rate, 48_000);
-            pts_seen.push(f.pts);
+            assert_eq!(f.samples.len(), 1536 * 6, "one syncframe is 1536 samples per channel");
+            assert_eq!(f.speakers(), [ac3::Speaker::FL, ac3::Speaker::FR, ac3::Speaker::FC, ac3::Speaker::LFE, ac3::Speaker::SL, ac3::Speaker::SR]);
+            frames += 1;
             out.extend_from_slice(&f.samples);
         }
     }
     out.extend(dec.flush().unwrap().into_iter().flat_map(|f| f.samples));
+    assert_eq!(dec.buffered(), 0);
+    assert!(frames >= 2);
     assert_eq!(out, direct);
-    assert_eq!(pts_seen[0], 5_000);
-    assert_eq!(pts_seen[1], 5_000 + 32_000, "one 1536-sample syncframe is 32 ms");
 }
 
 fn vectors_dir() -> Option<PathBuf> {

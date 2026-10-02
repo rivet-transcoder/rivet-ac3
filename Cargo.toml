@@ -1,0 +1,31 @@
+[package]
+name = "rivet-ac3"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license-file = "LICENSE.md"
+readme = "README.md"
+repository = "https://github.com/rivet-transcoder/rivet-ac3"
+homepage = "https://github.com/rivet-transcoder/rivet-ac3"
+documentation = "https://docs.rs/rivet-ac3"
+authors = ["Ely Erin Fox"]
+description = "An AC-3 / E-AC-3 (Dolby Digital / Digital Plus) decoder in Rust, written from ATSC A/52:2018: no C, no system libraries, no build script. AC-3 in full, E-AC-3 independent substream 0 with spectral extension and AHT; interleaved f32 out, speakers named. rivet's AC-3 decoder. Imported as `ac3`."
+keywords = ["ac3", "eac3", "dolby", "audio", "decoder"]
+categories = ["multimedia::audio", "multimedia::encoding"]
+exclude = [".github/"]
+
+[lib]
+name = "ac3"
+
+[dependencies]
+thiserror = "2"
+# Off by default. With it the decoder logs through `tracing`: the syntax
+# trace at TRACE, resynchronisation at DEBUG, skipped damaged frames at WARN.
+tracing = { version = "0.1", optional = true }
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
+
+[features]
+default = []
+tracing = ["dep:tracing"]

@@ -7,7 +7,7 @@
 # comparison is to float rounding. Everything lands in $OUT (default:
 # D:/rivet-ac3/vectors on the build box); point RIVET_AC3_VECTORS at it.
 #
-#   cargo build -p rivet-codec --example ac3_strip_dither
+#   cargo build --example ac3_strip_dither
 #   STRIP=<target>/debug/examples/ac3_strip_dither.exe bash ac3_make_vectors.sh
 #
 # ffmpeg's encoders never write a `dynrng` word, never switch blocks and

@@ -99,7 +99,9 @@ fn calc_lowcomp(a: i32, b0: i32, b1: i32, bin: usize) -> i32 {
 /// written for `start..end` only. With `hebap` set the E-AC-3 high-efficiency
 /// pointer table replaces Table 7.16 (Annex E §3.4.3.1) — the masking curve
 /// is identical, only the final lookup differs.
-#[allow(clippy::too_many_arguments)]
+// `begin` is set in each branch of the spec's two excitation initialisations
+// (§7.2.2.4), kept apart as the spec writes them.
+#[allow(clippy::too_many_arguments, clippy::needless_late_init)]
 pub(super) fn compute_bap(
     exps: &[u8],
     start: usize,

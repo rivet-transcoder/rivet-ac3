@@ -11,9 +11,9 @@
 //! Frames the decoder refuses (other substreams, unsupported tools) are copied
 //! unchanged. Leading junk before the first syncframe is dropped.
 //!
-//!     cargo run -p rivet-codec --example ac3_strip_dither -- in.ac3 out.ac3
+//!     cargo run --example ac3_strip_dither -- in.ac3 out.ac3
 
-use codec::audio::decode::ac3::{FrameDecoder, frame_crc_ok, parse_header};
+use ac3::{FrameDecoder, frame_crc_ok, parse_header};
 
 /// CRC-16, generator x¹⁶ + x¹⁵ + x² + 1, zero initial state (§7.10.1).
 fn crc16(data: &[u8]) -> u16 {
