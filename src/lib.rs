@@ -43,6 +43,7 @@
 pub mod bitalloc;
 mod bits;
 pub mod decoder;
+mod encoder;
 pub mod imdct;
 pub mod tables;
 
