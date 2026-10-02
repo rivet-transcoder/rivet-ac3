@@ -9,8 +9,8 @@ repository = "https://github.com/rivet-transcoder/rivet-ac3"
 homepage = "https://github.com/rivet-transcoder/rivet-ac3"
 documentation = "https://docs.rs/rivet-ac3"
 authors = ["Ely Erin Fox"]
-description = "An AC-3 / E-AC-3 (Dolby Digital / Digital Plus) decoder in Rust, written from ATSC A/52:2018: no C, no system libraries, no build script. AC-3 in full, E-AC-3 independent substream 0 with spectral extension and AHT; interleaved f32 out, speakers named. rivet's AC-3 decoder. Imported as `ac3`."
-keywords = ["ac3", "eac3", "dolby", "audio", "decoder"]
+description = "An AC-3 / E-AC-3 (Dolby Digital / Digital Plus) decoder and encoder in Rust, written from ATSC A/52:2018: no C, no system libraries, no build script. Decodes AC-3 in full and E-AC-3 independent substream 0 with spectral extension and AHT; encodes AC-3 at 32-640 kbit/s and E-AC-3 at 32-6144 kbit/s, every layout with or without LFE, 7.1 by a dependent substream. rivet's AC-3 codec. Imported as `ac3`."
+keywords = ["ac3", "eac3", "dolby", "decoder", "encoder"]
 categories = ["multimedia::audio", "multimedia::encoding"]
 exclude = [".github/"]
 

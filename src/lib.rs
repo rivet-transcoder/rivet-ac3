@@ -1,5 +1,25 @@
-//! AC-3 / E-AC-3 (Dolby Digital / Digital Plus) decoder, pure Rust,
-//! written from ATSC A/52:2018.
+//! AC-3 / E-AC-3 (Dolby Digital / Digital Plus) decoder and encoder, pure
+//! Rust, written from ATSC A/52:2018.
+//!
+//! Decoding: [`Decoder`] / [`FrameDecoder`], below. Encoding: [`Encoder`],
+//! configured by [`Config`] — AC-3 at every Table 5.18 bit rate and E-AC-3
+//! from 32 to 6144 kbit/s, every audio coding mode with or without LFE, 7.1
+//! as an E-AC-3 dependent substream. Input to the encoder is interleaved
+//! `f32` in the order the decoder outputs ([`Layout::speakers`]):
+//!
+//! ```
+//! let cfg = ac3::Config::new(ac3::Format::Ac3, 48_000, ac3::Layout::Stereo, false, 192);
+//! let mut enc = ac3::Encoder::new(cfg)?;
+//! let pcm = vec![0.0f32; 2 * 4800]; // 0.1 s of stereo silence
+//! let mut frames = enc.encode(&pcm)?;
+//! frames.extend(enc.flush()?);
+//! let mut dec = ac3::Decoder::new();
+//! for f in &frames {
+//!     assert_eq!(f.len(), 768); // 192 kbit/s at 48 kHz: 384 words
+//!     dec.decode(f)?;
+//! }
+//! # Ok::<(), ac3::Error>(())
+//! ```
 //!
 //! What it decodes
 //! ---------------
@@ -34,7 +54,9 @@
 //! statistics the cross-check harness reports.
 //!
 //! Tables live in [`tables`] with per-table checksum tests; the
-//! cross-check against libavcodec lives in `tests/ac3_decode_vectors.rs`.
+//! cross-check against libavcodec lives in `tests/ac3_decode_vectors.rs`, the
+//! encoder's checks (syntax, CRCs and frame sizes of every frame; round
+//! trips through the decoder) in `tests/encoder.rs`.
 //!
 //! With the `tracing` feature the decoder logs through `tracing`: the
 //! per-frame / per-block syntax trace at TRACE, resynchronisation at DEBUG

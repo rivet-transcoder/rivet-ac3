@@ -106,9 +106,11 @@ pub enum Coupling {
 /// Encoder configuration. [`Config::new`] fills in the defaults.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Config {
+    /// AC-3 or E-AC-3 syntax.
     pub format: Format,
-    /// 48 000, 44 100 or 32 000.
+    /// Samples per second: 48 000, 44 100 or 32 000.
     pub sample_rate: u32,
+    /// The full-bandwidth channels.
     pub layout: Layout,
     /// An LFE channel (input after the front channels).
     pub lfe: bool,
@@ -121,6 +123,7 @@ pub struct Config {
     pub bsmod: u8,
     /// `dialnorm`, 1–31: the dialogue level is −dialnorm dBFS. Default 31.
     pub dialnorm: u8,
+    /// Channel coupling policy. Default [`Coupling::Auto`].
     pub coupling: Coupling,
     /// Rematrixing in 2/0 (§8.2.6). Default on.
     pub rematrixing: bool,

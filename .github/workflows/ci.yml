@@ -31,8 +31,15 @@ jobs:
       # it on every run. The full sweep (ffmpeg-made vectors and Dolby-encoded
       # FATE streams, tests/data/ac3_make_vectors.sh) runs only where
       # RIVET_AC3_VECTORS points at them, and skips here.
+      # The encoder's tests (tests/encoder.rs) check every frame they write
+      # against A/52 and decode it with this crate's decoder: every AC-3
+      # layout x LFE x sample rate x bit rate, E-AC-3 32-6144 kbit/s, round
+      # trips. The report step prints the measured SNR, frequency response
+      # and pre-echo figures.
       - name: Tests
         run: cargo test --release
+      - name: Encoder report
+        run: cargo test --release --test encoder -- --nocapture --test-threads 1
       - name: Tests with the tracing feature (debug)
         run: cargo test --features tracing
 
@@ -44,6 +51,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
+      - run: cargo test --release --test encoder
 
   lint:
     name: clippy and rustdoc

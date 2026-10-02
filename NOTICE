@@ -1,4 +1,4 @@
-rivet-ac3 — an AC-3 / E-AC-3 decoder
+rivet-ac3 — an AC-3 / E-AC-3 decoder and encoder
 Copyright 2026 Ely Erin Fox
 
 This product is licensed under the Open Encoding Attribution License,
@@ -19,6 +19,16 @@ layer with an element-count check per table, the small ones typed in — and
 each names the spec table and PDF page it came from. None was taken from
 libavcodec or any other implementation.
 
+The encoder is likewise an original implementation, written from the same
+standard: its §8 (the informative description of an encoder) and the
+normative syntax and decoding processes its output must satisfy, with
+Annex E for E-AC-3. It is not a translation of, and does not derive from,
+any other AC-3 or E-AC-3 encoder's source (libavcodec's ac3enc / eac3enc,
+aften and Dolby's included: none was read). It reuses this crate's tables
+and bit allocation routine. Its tests check its output against the
+standard and decode it with this crate's decoder; no other encoder or
+decoder is run by them.
+
 The decoder is verified against libavcodec's decoder, used only as a black
 box (the ffmpeg command-line tool, whose PCM output is compared); none of its
 code is included or was consulted. The committed test stream in tests/data
@@ -35,7 +45,8 @@ about whether a licence is needed for any use.
 
 Dolby, Dolby Digital and Dolby Digital Plus are trademarks of Dolby
 Laboratories. This project is not affiliated with or endorsed by Dolby
-Laboratories; the names are used only to say which format it decodes.
+Laboratories; the names are used only to say which format it decodes and
+encodes.
 
 ------------------------------------------------------------------------------
 Third-party components
