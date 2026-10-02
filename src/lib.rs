@@ -48,8 +48,9 @@ pub mod imdct;
 pub mod tables;
 
 pub use decoder::{Features, FrameDecoder, Header, frame_crc_ok, parse_header};
+pub use encoder::{Config, Coupling, Encoder, Format, Layout};
 
-/// What can go wrong decoding a stream.
+/// What can go wrong decoding or encoding a stream.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     /// The bit stream is damaged or mis-parsed: a bad sync header, a field
@@ -60,10 +61,15 @@ pub enum Error {
     /// (enhanced coupling, bsid 9/10).
     #[error("unsupported: {0}")]
     Unsupported(String),
+    /// The encoder was given a configuration or input it cannot take: a
+    /// sample rate or bit rate the format does not have, a sample count that
+    /// is not a whole number of interleaved frames.
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
 }
 
 /// A speaker position, as the decoder names its output channels
-/// ([`Header::speakers`]).
+/// ([`Header::speakers`]) and the encoder its input ([`Layout::speakers`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Speaker {
     /// Front left.
@@ -80,6 +86,11 @@ pub enum Speaker {
     SL,
     /// Side right (the right surround of `acmod` 2/2 and 3/2).
     SR,
+    /// Back left (7.1's left rear surround, carried by an E-AC-3 dependent
+    /// substream; the decoder does not output it).
+    BL,
+    /// Back right (7.1's right rear surround).
+    BR,
 }
 
 impl std::fmt::Display for Speaker {
@@ -92,6 +103,8 @@ impl std::fmt::Display for Speaker {
             Speaker::BC => "BC",
             Speaker::SL => "SL",
             Speaker::SR => "SR",
+            Speaker::BL => "BL",
+            Speaker::BR => "BR",
         })
     }
 }
