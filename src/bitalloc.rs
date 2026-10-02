@@ -101,7 +101,7 @@ fn calc_lowcomp(a: i32, b0: i32, b1: i32, bin: usize) -> i32 {
 /// is identical, only the final lookup differs.
 // `begin` is set in each branch of the spec's two excitation initialisations
 // (§7.2.2.4), kept apart as the spec writes them.
-#[allow(clippy::too_many_arguments, clippy::needless_late_init)]
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compute_bap(
     exps: &[u8],
     start: usize,
@@ -118,6 +118,32 @@ pub(super) fn compute_bap(
     if end <= start {
         return;
     }
+    let m = compute_mask(exps, start, end, fscod, params, fgain, kind, delta);
+    bap_from_mask(&m, start, end, params.floor, snroffset, hebap, bap);
+}
+
+/// The output of §7.2.2.2–7.2.2.6: the PSD per bin and the masking curve per
+/// band, everything the allocation needs that does not depend on the SNR
+/// offset. An encoder searching for the offset that fills a frame computes
+/// this once per channel and block and calls [`bap_from_mask`] per trial.
+#[derive(Clone)]
+pub(crate) struct Mask {
+    pub psd: [i32; 256],
+    pub mask: [i32; 50],
+}
+
+/// §7.2.2.2–7.2.2.6 for bins `start..end` (`end > start`).
+#[allow(clippy::too_many_arguments, clippy::needless_late_init)]
+pub(crate) fn compute_mask(
+    exps: &[u8],
+    start: usize,
+    end: usize,
+    fscod: u8,
+    params: &BaParams,
+    fgain: i32,
+    kind: Kind,
+    delta: Option<&DeltaBa>,
+) -> Mask {
     // 7.2.2.2 exponent mapping into PSD
     let mut psd = [0i32; 256];
     for bin in start..end {
@@ -224,20 +250,26 @@ pub(super) fn compute_bap(
         }
     }
 
-    // 7.2.2.7 bit allocation pointers
+    Mask { psd, mask }
+}
+
+/// §7.2.2.7: bit allocation pointers for bins `start..end` from a masking
+/// curve and an SNR offset (`floor` is the `floortab` value in use).
+pub(crate) fn bap_from_mask(m: &Mask, start: usize, end: usize, floor: i32, snroffset: i32, hebap: bool, bap: &mut [u8]) {
     let mut i = start;
     let mut j = MASKTAB[start] as usize;
     loop {
         let lastbin = (BNDTAB[j] as usize + BNDSZ[j] as usize).min(end);
-        mask[j] -= snroffset;
-        mask[j] -= params.floor;
-        if mask[j] < 0 {
-            mask[j] = 0;
+        let mut mask = m.mask[j];
+        mask -= snroffset;
+        mask -= floor;
+        if mask < 0 {
+            mask = 0;
         }
-        mask[j] &= 0x1fe0;
-        mask[j] += params.floor;
+        mask &= 0x1fe0;
+        mask += floor;
         while i < lastbin {
-            let address = ((psd[i] - mask[j]) >> 5).clamp(0, 63) as usize;
+            let address = ((m.psd[i] - mask) >> 5).clamp(0, 63) as usize;
             bap[i] = if hebap { HEBAPTAB[address] } else { BAPTAB[address] };
             i += 1;
         }
@@ -279,6 +311,38 @@ mod tests {
         let mut hb = [0u8; 256];
         compute_bap(&loud, 0, 253, 0, &params, fast_gain(4), snr_offset(20, 0), Kind::Fbw, None, true, &mut hb);
         assert!(hb[..253].iter().zip(&bap[..253]).all(|(h, b)| h >= b));
+    }
+
+    /// §7.2.2 worked by hand for an LFE block (bins 0..7, one bin per band,
+    /// fscod 0) with the §8.2.12 nominal parameters: sdecay 0x13, fdecay
+    /// 0x53, sgain 0x4d8, dbknee 0x900, floor 0x1f0 (floorcod 4), fgain 0x280.
+    #[test]
+    fn hand_computed_lfe_allocation() {
+        let params = BaParams::from_codes(2, 1, 1, 2, 4);
+        assert_eq!((params.sdecay, params.fdecay, params.sgain, params.dbknee, params.floor), (0x13, 0x53, 0x4d8, 0x900, 0x1f0));
+        let mut bap = [0u8; 256];
+        // Exponents all 10: psd = 3072 − (10 << 7) = 1792 in every band.
+        // excite[0], excite[1] = 1792 − 640 − lowcomp 0 = 1152; bin 2 starts
+        // the leaks at fastleak 1152 / slowleak 552 and, as bndpsd[2] ≤
+        // bndpsd[3], hands over to the decay loop, where max(fastleak − 83,
+        // 1152) keeps 1152. bndpsd 1792 < dbknee 2304 adds (2304 − 1792) >> 2
+        // = 128 → 1280, above hth[0][0..7] (0x4d0 = 1232 at most) → mask 1280.
+        // snroffset(15, 0) = 0: (1280 − 496) & 0x1fe0 = 768, + 496 = 1264;
+        // address (1792 − 1264) >> 5 = 16 → baptab[16] = 6.
+        let mut exps = [10u8; 256];
+        compute_bap(&exps, 0, 7, 0, &params, fast_gain(4), snr_offset(15, 0), Kind::Lfe, None, false, &mut bap);
+        assert_eq!(&bap[..7], &[6; 7]);
+        // snroffset(20, 8) = ((5 << 4) + 8) << 2 = 352: (1280 − 352 − 496) =
+        // 432 & 0x1fe0 = 416, + 496 = 912; (1792 − 912) >> 5 = 27 → baptab[27] = 9.
+        compute_bap(&exps, 0, 7, 0, &params, fast_gain(4), snr_offset(20, 8), Kind::Lfe, None, false, &mut bap);
+        assert_eq!(&bap[..7], &[9; 7]);
+        // A louder bin 0 (exponent 4, psd 2560): calc_lowcomp sees b0 > b1
+        // and leaves lowcomp at 0, excite[0] = 2560 − 640 = 1920 (no dbknee
+        // boost, 2560 ≥ 2304) → (1920 − 496) & 0x1fe0 = 1408, + 496 = 1904;
+        // (2560 − 1904) >> 5 = 20 → baptab[20] = 7. Bins 1..7 as before.
+        exps[0] = 4;
+        compute_bap(&exps, 0, 7, 0, &params, fast_gain(4), snr_offset(15, 0), Kind::Lfe, None, false, &mut bap);
+        assert_eq!(&bap[..7], &[7, 6, 6, 6, 6, 6, 6]);
     }
 
     #[test]
