@@ -5,10 +5,12 @@
 //! (`imdct`). One `FrameDecoder` holds the only state that outlives a
 //! syncframe: the overlap-add delay lines and the dither generator.
 //!
-//! Scope: AC-3 (bsid ≤ 8) in full; E-AC-3 (bsid 16) independent substream 0
-//! with standard coupling, AHT (VQ + GAQ) and spectral extension. Enhanced
-//! coupling (`ecplinu`), dependent substreams and additional independent
-//! substreams are refused or skipped by name below.
+//! Scope: AC-3 (bsid ≤ 8) in full; E-AC-3 (bsid 16) substreams with
+//! standard coupling, AHT (VQ + GAQ) and spectral extension. Enhanced
+//! coupling (`ecplinu`) is refused by name below. A `FrameDecoder` decodes
+//! independent substream 0 and skips the others unless told to decode them
+//! all; the programme a dependent substream belongs to is assembled by
+//! `Decoder` (the `programme` module).
 
 use super::bitalloc::{BaParams, DeltaBa, Kind, compute_bap, fast_gain, snr_offset};
 use super::bits::BitReader;
@@ -1801,6 +1803,13 @@ pub(crate) fn output_order(acmod: u8, lfeon: bool) -> Vec<usize> {
     let fronts = if acmod == 1 { 1 } else if acmod & 1 == 1 { 3 } else { 2 };
     v.extend(fronts..nf);
     v
+}
+
+/// For each output slot of a layout (`output_order`), the coded
+/// full-bandwidth channel it carries (0 = the first in Table 5.8's order),
+/// or `None` for the LFE.
+pub(crate) fn coded_output_channels(acmod: u8, lfeon: bool) -> Vec<Option<usize>> {
+    output_order(acmod, lfeon).into_iter().map(|c| (c != LFE).then_some(c)).collect()
 }
 
 /// AC-3 `bsi()` (Table 5.2) after the fixed 8-byte prefix; skips everything

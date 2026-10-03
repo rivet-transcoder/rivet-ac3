@@ -36,7 +36,7 @@ ac3 = { package = "rivet-ac3", git = "https://github.com/rivet-transcoder/rivet-
 | | supported | refused or skipped |
 |---|---|---|
 | **AC-3** (bsid ≤ 8) | every `acmod`, 1–6 channels including LFE; block switching, dither, coupling with phase flags, rematrixing, delta bit allocation, dynamic range compression (`dynrng`, applied by default, scalable) | bsid 9 / 10 (Annex D reduced-rate AC-3): `Error::Unsupported` |
-| **E-AC-3** (bsid 16) | independent substream 0: every `numblkscod` (1, 2, 3 and 6 blocks), reduced sample rates, frame exponent strategies, the three SNR-offset strategies, standard coupling, spectral extension with attenuation, the adaptive hybrid transform (vector and gain-adaptive quantisation) | enhanced coupling (`ecplinu = 1`): `Error::Unsupported`. Dependent substreams and independent substreams other than 0 are skipped (Annex E §3.8.1), so 7.1 decodes as its 5.1 core (`FrameDecoder::set_decode_all_substreams` decodes one as a programme of its own, a diagnostic the encoder's tests use) |
+| **E-AC-3** (bsid 16) | independent substream 0 and its dependent substreams, each channel put where `chanmap` (or the substream's own `acmod`) says, so 7.1 decodes as eight channels (`Decoder`): every `numblkscod` (1, 2, 3 and 6 blocks), reduced sample rates, frame exponent strategies, the three SNR-offset strategies, standard coupling, spectral extension with attenuation, the adaptive hybrid transform (vector and gain-adaptive quantisation) | enhanced coupling (`ecplinu = 1`): `Error::Unsupported`. Independent substreams other than 0 are skipped (Annex E §3.8.1); a dependent substream mapped to a location with no output here (Lc/Rc, Ts, Lsd/Rsd, Lw/Rw, the heights, LFE2) is left out. `FrameDecoder` decodes one substream at a time |
 | **Not applied** | — | `dialnorm` and heavy compression (`compr`) are parsed and not applied; transient pre-noise processing is parsed and ignored (an optional post-process) |
 
 No downmix is performed. Output is interleaved `f32` at ±1.0 full scale,
@@ -192,7 +192,11 @@ point and block 5's mantissas start after it (§5.5); the bits from the last
 block to `auxdatae` are zero padding. That check runs over every `acmod`
 with and without LFE at 48, 44.1 and 32 kHz and every AC-3 rate (912
 configurations), and over E-AC-3 at 32–6144 kbit/s for every layout, 7.1
-included (whose dependent substream the test decodes on its own).
+included (whose dependent substream the test decodes on its own). And
+`Decoder` puts 7.1 back together from its two substreams: a tone per
+speaker comes back in its own slot of eight (FL FR FC LFE BL BR SL SR) at
+its level, every other speaker's tone more than 80 dB down there, whether
+it is handed access units, one byte string or bytes cut anywhere.
 
 Unit tests pin the parts to the spec: the forward transform against
 §8.2.3.2's printed sum (to 1e-12) and, through the decoder's IMDCT, perfect

@@ -559,3 +559,84 @@ fn coupling_and_rematrixing_can_be_forced_off_and_on() {
     cfg.dialnorm = 24;
     roundtrip(cfg);
 }
+
+/// The amplitude of `freq` Hz in `x` at `fs`.
+fn tone_amplitude(x: &[f32], freq: f64, fs: u32) -> f64 {
+    let w = std::f64::consts::TAU * freq / f64::from(fs);
+    let (mut s1, mut s2) = (0.0f64, 0.0f64);
+    for &v in x {
+        let s = f64::from(v) + 2.0 * w.cos() * s1 - s2;
+        s2 = s1;
+        s1 = s;
+    }
+    2.0 * (s1 * s1 + s2 * s2 - 2.0 * w.cos() * s1 * s2).sqrt() / x.len() as f64
+}
+
+/// 7.1 through `ac3::Decoder`: the dependent substream's back surrounds
+/// join the independent substream's 5.1 as eight channels, FL FR FC LFE BL
+/// BR SL SR, each speaker's own tone in its own slot and no other there —
+/// whether the decoder is handed whole access units, one byte string, or
+/// bytes cut anywhere (between the two substreams included).
+#[test]
+fn seven_one_decodes_to_eight_channels_each_in_its_place() {
+    use Speaker::*;
+    let cfg = Config::new(Format::Eac3, 48_000, Layout::ThreeFour, true, 768);
+    let speakers = Layout::ThreeFour.speakers(true);
+    assert_eq!(speakers, vec![FL, FR, FC, LFE, BL, BR, SL, SR]);
+    let tones = [400.0, 600.0, 800.0, 50.0, 1000.0, 1200.0, 1400.0, 1600.0];
+    let n = 48_000;
+    let pcm: Vec<f32> =
+        (0..n * 8).map(|i| (0.25 * (std::f64::consts::TAU * tones[i % 8] * (i / 8) as f64 / 48_000.0).sin()) as f32).collect();
+    let aus = encode(cfg, &pcm);
+    let decode = |chunks: Vec<&[u8]>| {
+        let mut dec = ac3::Decoder::new();
+        let mut frames = Vec::new();
+        for c in chunks {
+            frames.extend(dec.decode(c).unwrap());
+        }
+        frames.extend(dec.flush().unwrap());
+        frames
+    };
+    let whole = decode(aus.iter().map(Vec::as_slice).collect());
+    let joined: Vec<u8> = aus.concat();
+    assert_eq!(whole, decode(vec![&joined]), "one byte string");
+    assert_eq!(whole, decode(joined.chunks(97).collect()), "cut every 97 bytes");
+    // Cut exactly between each access unit's independent and dependent
+    // substream: once the stream has shown it has dependent substreams the
+    // decoder waits for them; the very first frame, with nothing yet to say
+    // so, goes out as the 5.1 it is.
+    let mut cut = Vec::new();
+    for au in &aus {
+        let len = parse_header(au).unwrap().frame_len;
+        cut.push(&au[..len]);
+        cut.push(&au[len..]);
+    }
+    let cut = decode(cut);
+    assert_eq!(cut[0].channels, 6);
+    assert_eq!(whole[1..], cut[1..], "cut between the substreams");
+    assert_eq!(whole.len(), aus.len());
+    for f in &whole {
+        assert_eq!((f.channels, f.speakers()), (8, speakers.clone()));
+    }
+    let out: Vec<f32> = whole.iter().flat_map(|f| f.samples.iter().copied()).collect();
+    // Past the encoder's start-up, a whole number of 50 Hz periods.
+    let from = 8 * 4800;
+    for (c, &own) in tones.iter().enumerate() {
+        let ch: Vec<f32> = out[from..].iter().skip(c).step_by(8).copied().take(38_400).collect();
+        let level = tone_amplitude(&ch, own, 48_000);
+        let worst = tones
+            .iter()
+            .filter(|&&t| t != own)
+            .map(|&t| (t, tone_amplitude(&ch, t, 48_000)))
+            .fold((0.0, 0.0f64), |a, b| if b.1 > a.1 { b } else { a });
+        eprintln!(
+            "7.1 {}: own {own} Hz at {:+.2} dB, worst other {} Hz at {:.1} dB",
+            speakers[c],
+            20.0 * (level / 0.25).log10(),
+            worst.0,
+            20.0 * (worst.1 / 0.25).log10()
+        );
+        assert!((20.0 * (level / 0.25).log10()).abs() < 1.0, "{}: its own tone at {level:.4}", speakers[c]);
+        assert!(worst.1 < 0.25 * 0.01, "{}: {} Hz at {:.4}", speakers[c], worst.0, worst.1);
+    }
+}
