@@ -40,12 +40,11 @@
 //!   skipped (Annex E §3.8.1 says a reference decoder may), so a 7.1
 //!   E-AC-3 stream decodes as its 5.1 core.
 //! - bsid 9/10 (Annex D reduced-rate AC-3) → `Unsupported`.
-//! - `dialnorm` and heavy compression (`compr`) are not applied, matching
-//!   libavcodec's default; transient pre-noise processing is parsed and
+//! - `dialnorm` and heavy compression (`compr`) are not applied; transient pre-noise processing is parsed and
 //!   ignored (an optional post-process).
 //!
-//! Output is f32 interleaved in ffmpeg's native order for the layout (for
-//! 5.1: FL FR FC LFE SL SR), named speaker by speaker by
+//! Output is f32 interleaved in WAVE order for the layout (for 5.1: FL FR
+//! FC LFE SL SR), named speaker by speaker by
 //! [`Header::speakers`]. No downmix is performed here.
 //!
 //! Two levels of API: [`Decoder`] takes bytes in any chunking, resynchronises
@@ -54,7 +53,8 @@
 //! statistics the cross-check harness reports.
 //!
 //! Tables live in [`tables`] with per-table checksum tests; the
-//! cross-check against libavcodec lives in `tests/ac3_decode_vectors.rs`, the
+//! cross-checks against liba52 and Dolby's own encodes live in
+//! `tests/ac3_decode_vectors.rs`, the
 //! encoder's checks (syntax, CRCs and frame sizes of every frame; round
 //! trips through the decoder) in `tests/encoder.rs`.
 //!

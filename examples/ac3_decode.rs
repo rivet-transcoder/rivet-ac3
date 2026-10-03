@@ -1,12 +1,11 @@
-//! Decode an AC-3 / E-AC-3 elementary stream to raw f32le PCM with the
-//! this crate's decoder — the counterpart of `ffmpeg -i x.ac3 -f f32le`.
+//! Decode an AC-3 / E-AC-3 elementary stream to raw interleaved f32le PCM
+//! (WAVE channel order) with this crate's decoder.
 //!
 //!     cargo run --example ac3_decode -- in.ac3 out.f32 [drc_scale] [noise_seed|off]
 //!
 //! Prints the stream layout, the decoder's dither / dynrng statistics and the
 //! coding tools the stream exercised. Leading junk before the first
-//! syncframe is skipped and a truncated final frame dropped, as libavcodec
-//! does. `RUST_LOG=trace`, in a build with `--features tracing`, prints the
+//! syncframe is skipped and a truncated final frame dropped. `RUST_LOG=trace`, in a build with `--features tracing`, prints the
 //! decoder's per-frame / per-block syntax trace on stderr;
 //! `AC3_DECODE_FRAMES=1` prints one line per syncframe with
 //! the coding tools that frame used (the deltas of the `Features` counters),

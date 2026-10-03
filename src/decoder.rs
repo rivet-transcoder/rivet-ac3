@@ -465,10 +465,10 @@ impl FrameDecoder {
     /// blocks in which the full-bandwidth channels did not all use the same
     /// transform length — some `blksw[ch]` set, others clear. A real encoder
     /// switches one channel on a transient in that channel. Per §7.9.4 each
-    /// channel overlap-adds with its own previous tail regardless; libavcodec
-    /// (checked on two Dolby-encoded streams) applies the switched channel's
-    /// previous tail to a neighbouring channel in exactly these blocks, so
-    /// the cross-check masks them. Bounded by the number of such blocks in
+    /// channel overlap-adds with its own previous tail regardless; a decoder
+    /// that applies the switched channel's previous tail to a neighbouring
+    /// channel differs in exactly these blocks, so a cross-check can mask
+    /// them (`RIVET_AC3_MASK_MIXED` in `tests/ac3_decode_vectors.rs`). Bounded by the number of such blocks in
     /// the stream, which is small.
     pub fn mixed_transform_blocks(&self) -> &[u64] {
         &self.mixed_blksw
@@ -557,8 +557,8 @@ impl FrameDecoder {
     }
 
     /// Decode one complete syncframe starting at `data[0]` (the syncword).
-    /// Appends `samples * channels` interleaved f32 PCM to `out` in ffmpeg's
-    /// native channel order for the layout (fronts, LFE, then surrounds).
+    /// Appends `samples * channels` interleaved f32 PCM to `out` in WAVE
+    /// channel order for the layout (fronts, LFE, then surrounds).
     /// Returns `Ok(None)` for E-AC-3 substreams other than independent
     /// substream 0, which are skipped per Annex E §3.8.1.
     pub fn decode(&mut self, data: &[u8], out: &mut Vec<f32>) -> Result<Option<Header>, Error> {
@@ -713,8 +713,8 @@ impl FrameDecoder {
             f.frmcsnroffst = br.read(6)? as u8;
             f.frmfsnroffst = br.read(4)? as u8;
         }
-        // transient pre-noise processing: parsed, not applied (optional
-        // post-process; libavcodec skips it too).
+        // transient pre-noise processing: parsed, not applied (an optional
+        // post-process).
         if transproce {
             for _ in 0..hdr.nfchans {
                 if br.read_bit()? {
@@ -889,7 +889,7 @@ impl FrameDecoder {
             if f.cplinu {
                 if eac3 && br.read_bit()? {
                     return Err(Error::Unsupported(
-                        "eac3: enhanced coupling (ecplinu=1) — not implemented (no cross-check vector: libavcodec refuses it too)".into(),
+                        "eac3: enhanced coupling (ecplinu=1) — not implemented (no stream to check it against)".into(),
                     ));
                 }
                 if eac3 && hdr.acmod == 2 {
@@ -1785,8 +1785,9 @@ pub(super) fn dynrng_gain(dynrng: u8) -> f32 {
 }
 
 /// Internal channel indices in output order: fronts as FL FR FC, then LFE,
-/// then the surround(s) — ffmpeg's native order for each layout, which is
-/// what `channelmap` and the Opus encoder assume for a channel count.
+/// then the surround(s) — WAVE order (the `WAVEFORMATEXTENSIBLE` channel-mask
+/// order) for each layout, which is what `channelmap` and the Opus encoder
+/// assume for a channel count.
 pub(crate) fn output_order(acmod: u8, lfeon: bool) -> Vec<usize> {
     let nf = nfchans_for(acmod);
     let mut v: Vec<usize> = match acmod {
@@ -2068,7 +2069,7 @@ mod tests {
     }
 
     #[test]
-    fn output_order_is_ffmpeg_native() {
+    fn output_order_is_wave_order() {
         assert_eq!(output_order(7, true), vec![0, 2, 1, LFE, 3, 4]); // L C R Ls Rs → FL FR FC LFE SL SR
         assert_eq!(output_order(2, false), vec![0, 1]);
         assert_eq!(output_order(4, true), vec![0, 1, LFE, 2]); // L R S → FL FR LFE BC
