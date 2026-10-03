@@ -1,7 +1,7 @@
 """Make a block-switched AC-3 cross-check vector out of an ordinary one.
 
-ffmpeg's AC-3 encoder never sets `blksw`, so the 256-point transform
-(A/52 §7.9.4.2) has no cross-check vector of its own. `blksw[ch]` is the
+An encoder sets `blksw` only on transients, so the 256-point transform
+(A/52 §7.9.4.2) is rare in ordinary vectors. `blksw[ch]` is the
 first bit per channel of every `audblk()` and nothing in the syntax depends
 on it — it only selects the inverse transform — so setting it turns any
 stream into a (partly) short-block one that both decoders must still agree
@@ -18,7 +18,7 @@ frame (only block 0's start is known from `bsi()` alone, so N > 0 takes
 the block boundary from the in-tree decoder's trace — see
 `ac3_blksw_offsets`), and only every K-th frame. Switching a single
 channel is how a real encoder does it (a transient in one channel), and
-it is where libavcodec's overlap-add departs from §7.9.4 step 6: a channel
+it is where a decoder's overlap-add can depart from §7.9.4 step 6: a channel
 that is not switched must not change when another one is.
 """
 import sys
