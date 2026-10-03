@@ -1,11 +1,23 @@
-//! Cross-check of this crate's AC-3 / E-AC-3 decoder against libavcodec.
+//! Cross-check of this crate's AC-3 / E-AC-3 decoder against independent
+//! implementations, run as black boxes. No FFmpeg is involved anywhere.
 //!
-//! The vectors are made by `tests/data/ac3_make_vectors.sh`
-//! with the real ffmpeg binary: for each case an elementary stream and
-//! libavcodec's f32le decode of it (`<name>.drc1.f32` with dynrng applied,
-//! `<name>.drc0.f32` with `-drc_scale 0`). Point `RIVET_AC3_VECTORS` at that
-//! directory to run the full sweep; without it the sweep is skipped and
-//! only the committed 5.1 fixture (`tests/data/ac3_51_448k.*`) runs.
+//! - The committed fixture (`tests/data/aften_51_448k.*`, made by
+//!   `tools/make_fixture.sh`) is a stream from aften, an independent AC-3
+//!   encoder, with liba52's decode of it (GStreamer's `a52dec` element) as
+//!   16-bit PCM. It runs on every `cargo test`.
+//! - The sweep runs over the directory `RIVET_AC3_VECTORS` names: the aften
+//!   vectors `tools/make_vectors.sh` makes (each an elementary stream plus
+//!   liba52's f32le decode of it, `<name>.drc1.f32` with dynrng applied and
+//!   `<name>.drc0.f32` without), and in its `dolby/` subdirectory the
+//!   Dolby-encoded streams `tools/fetch_dolby_kit.sh` fetches from Dolby's
+//!   own test kit. Without the variable the sweep is skipped, unless
+//!   `RIVET_AC3_REQUIRE_VECTORS` is set (as in CI's oracle job), when a
+//!   missing directory fails.
+//! - E-AC-3 has no decoder available to compare with but FFmpeg's, which is
+//!   not used. Dolby's E-AC-3 encode of its channel-identification programme
+//!   is instead checked against liba52's decode of Dolby's AC-3 encode of the
+//!   same programme: same timing, levels, and band energies, and a waveform
+//!   SNR only a correct decode of both reaches (see `dolby_eac3_*`).
 //!
 //! Pass criterion
 //! --------------
@@ -87,37 +99,23 @@ struct Decoded {
     drc: (u64, u64),
     /// Which coding tools the stream exercised.
     features: Features,
-    /// The stream ended inside a syncframe (dropped, as libavcodec drops it).
+    /// The stream ended inside a syncframe (dropped).
     truncated_tail: bool,
-    /// Blocks where the fbw channels used different transform lengths.
-    /// libavcodec overlap-adds the switched channel's previous tail onto a
-    /// neighbouring channel there (seen on two Dolby-encoded FATE streams,
-    /// `millers_crossing_4.0` and `monsters_inc_2.0_192`), contrary to
-    /// §7.9.4 step 6, so these blocks are masked out of the comparison and
-    /// counted in the report.
+    /// Blocks where the fbw channels used different transform lengths. One
+    /// earlier reference decoder overlap-added the switched channel's previous
+    /// tail onto a neighbouring channel there, contrary to §7.9.4 step 6, so
+    /// these blocks can be masked out of the comparison and counted in the
+    /// report; against liba52 they are compared like any other block
+    /// (`MASK_MIXED`).
     mixed_blocks: Vec<u64>,
     /// The last syncframe's header (layout, LFE).
     header: Option<Header>,
 }
 
-impl Decoded {
-    /// Output slot of the LFE, if the stream has one: the fronts come first
-    /// in ffmpeg's native order, then the LFE.
-    fn lfe_slot(&self) -> Option<usize> {
-        let h = self.header?;
-        h.lfeon.then_some(match h.acmod {
-            1 => 1,
-            0 | 2 | 4 | 6 => 2,
-            _ => 3,
-        })
-    }
-}
-
 /// Decode a whole elementary stream with the `FrameDecoder`, frame by
 /// frame, checking every frame's CRC on the way. Leading junk before the
 /// first syncword is skipped (some captured streams start mid-frame) and a
-/// truncated final frame is dropped, both exactly as libavcodec does, so the
-/// sample counts still line up.
+/// truncated final frame is dropped, so the sample counts still line up.
 fn decode_es(es: &[u8], drc_scale: f32, noise_fill: bool) -> Decoded {
     let mut dec = FrameDecoder::new(drc_scale);
     dec.set_noise_fill(noise_fill);
@@ -162,11 +160,11 @@ fn decode_es(es: &[u8], drc_scale: f32, noise_fill: bool) -> Decoded {
 
 /// How much of our own output is §7.3.4 noise fill: the difference between
 /// a normal decode and one with the noise fill switched off. Where nothing
-/// is dithered it is 0. libavcodec's noise has the same amplitude and is
-/// independent of ours, so the expected disagreement is √2 × this RMS.
+/// is dithered it is 0. The reference decoder's noise has the same amplitude
+/// and is independent of ours, so the expected disagreement is √2 × this RMS.
 fn noise_floor(es: &[u8], drc_scale: f32, ours: &Decoded) -> Stats {
     let silent = decode_es(es, drc_scale, false);
-    compare(&ours.pcm, &silent.pcm, ours.channels, &ours.mixed_blocks)
+    compare(&ours.pcm, &silent.pcm, ours.channels, mask(ours))
 }
 
 fn report(name: &str, s: &Stats) -> String {
@@ -180,11 +178,11 @@ fn report(name: &str, s: &Stats) -> String {
     line
 }
 
-/// The gate. Per channel, against libavcodec:
+/// The gate. Per channel, against the reference decoder:
 /// - RMS error ≤ max(1 LSB16, 1.5 × √2 × our noise-fill RMS). Two
 ///   independent ±0.707 noise sequences differ by √2 × one of them in
 ///   expectation; the 1.5 covers the realisation variance of short files
-///   whose noise is dominated by a few high-exponent bins, and libavcodec's
+///   whose noise is dominated by a few high-exponent bins, and a decoder's
 ///   freedom to use ±0.5 or ±0.75 instead (§7.3.4). 1 LSB16 is float
 ///   rounding plus a 16-bit reference's own rounding.
 /// - peak error ≤ max(8 LSB16, 2.5 × our noise-fill peak): the peaks of two
@@ -195,17 +193,9 @@ fn report(name: &str, s: &Stats) -> String {
 /// float rounding, so a real bug shows up as a jump far beyond either bound
 /// (the `hth` mutation in the report raises the RMS ~1000×).
 ///
-/// Two documented cases where libavcodec's own noise is not what the floor
-/// measures get a wider bound, named in the report line:
-/// - Streams using E-AC-3 spectral extension: the noise blend
-///   (Annex E §3.6.4.2) is "pseudo-random noise" with no distribution
-///   fixed by the spec; on Dolby's `csi_miami_*_spx` streams the fbw
-///   channels sit at 1.2–1.8× the dither-only expectation, level-proportional
-///   and uncorrelated with AHT use. Factors 2.5 / 3.5 instead of 1.5 / 2.5.
-/// - The LFE of a stream using AHT: libavcodec noise-fills the LFE's
-///   zero-bit AHT bins (a frame with every `hebap` 0 at exponent 15 comes
-///   out at ≈ 0.9 LSB16 = 0.707·2⁻¹⁵ where ours is silent; §7.3.4 dither is
-///   per fbw channel). Absolute floor 2 / 16 LSB16 instead of 1 / 8.
+/// The references are AC-3 only (liba52 decodes no E-AC-3), so the
+/// E-AC-3 tools whose noise is not what the floor measures (spectral
+/// extension's noise blend, AHT) never reach this gate.
 fn check(name: &str, s: &Stats, noise: &Stats, d: &Decoded) {
     let mut line = report(name, s);
     line.push_str(&format!(
@@ -218,22 +208,14 @@ fn check(name: &str, s: &Stats, noise: &Stats, d: &Decoded) {
         d.drc.1,
         d.features
     ));
-    let spx = d.features.spx_blocks > 0;
-    let aht_lfe = if d.features.aht_channels > 0 { d.lfe_slot() } else { None };
-    if spx {
-        line.push_str("; gate: spx (2.5x / 3.5x)");
-    }
-    if aht_lfe.is_some() {
-        line.push_str("; gate: aht lfe floor 2 / 16 LSB16");
-    }
     println!("{line}");
     assert!(s.compared > 0, "{name}: nothing compared");
     // `RIVET_AC3_REPORT_ONLY` turns the gate into a report, to see every
     // vector's numbers in one run while tuning.
     let report_only = std::env::var_os("RIVET_AC3_REPORT_ONLY").is_some();
-    let (rms_factor, peak_factor) = if spx { (2.5, 3.5) } else { (1.5, 2.5) };
+    let (rms_factor, peak_factor) = (1.5, 2.5);
+    let (rms_floor, peak_floor) = (1.0, 8.0);
     for c in 0..s.channels {
-        let (rms_floor, peak_floor) = if aht_lfe == Some(c) { (2.0, 16.0) } else { (1.0, 8.0) };
         let expected = std::f32::consts::SQRT_2 * noise.rms[c];
         let rms_limit = (rms_factor * expected).max(rms_floor * LSB16);
         let peak_limit = (peak_factor * noise.peak[c]).max(peak_floor * LSB16);
@@ -252,21 +234,30 @@ fn check(name: &str, s: &Stats, noise: &Stats, d: &Decoded) {
     }
 }
 
-/// The committed fixture: 250 ms of 5.1 AC-3 at 448 kbit/s from ffmpeg's
-/// encoder, with libavcodec's decode as s16le. Always runs.
+/// The blocks to leave out of a comparison: the mixed-transform blocks when
+/// `RIVET_AC3_MASK_MIXED` is set, none otherwise (liba52 follows §7.9.4
+/// there, so by default they are compared like every other block).
+fn mask(d: &Decoded) -> &[u64] {
+    if std::env::var_os("RIVET_AC3_MASK_MIXED").is_some() { &d.mixed_blocks } else { &[] }
+}
+
+/// The committed fixture: 250 ms of 5.1 AC-3 at 448 kbit/s from aften (block
+/// switching on, a `dynrng` profile), with liba52's decode as s16le
+/// (`tools/make_fixture.sh`). Always runs.
 #[test]
-fn committed_5_1_fixture_matches_libavcodec() {
+fn committed_5_1_fixture_matches_liba52() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data");
-    let es = std::fs::read(dir.join("ac3_51_448k.ac3")).expect("fixture ac3_51_448k.ac3");
-    let reference = read_s16le(&dir.join("ac3_51_448k.s16le"));
+    let es = std::fs::read(dir.join("aften_51_448k.ac3")).expect("fixture aften_51_448k.ac3");
+    let reference = read_s16le(&dir.join("aften_51_448k.liba52.s16le"));
     let ours = decode_es(&es, 1.0, true);
     assert_eq!(ours.channels, 6);
     assert!(ours.frames >= 7, "expected ≥ 7 syncframes, got {}", ours.frames);
-    assert_eq!(ours.pcm.len(), reference.len(), "sample count differs from libavcodec");
-    let s = compare(&ours.pcm, &reference, 6, &ours.mixed_blocks);
+    assert!(ours.drc.0 > 0, "the fixture should carry dynrng words");
+    assert_eq!(ours.pcm.len(), reference.len(), "sample count differs from liba52");
+    let s = compare(&ours.pcm, &reference, 6, mask(&ours));
     let noise = noise_floor(&es, 1.0, &ours);
     // The reference is 16-bit, so its own rounding contributes up to 0.5 LSB16.
-    check("ac3_51_448k (s16 ref)", &s, &noise, &ours);
+    check("aften_51_448k (s16 ref)", &s, &noise, &ours);
 }
 
 /// The stream `Decoder` must produce the same PCM as the frame decoder when
@@ -274,7 +265,7 @@ fn committed_5_1_fixture_matches_libavcodec() {
 #[test]
 fn stream_decoder_reassembles_split_frames() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data");
-    let es = std::fs::read(dir.join("ac3_51_448k.ac3")).expect("fixture");
+    let es = std::fs::read(dir.join("aften_51_448k.ac3")).expect("fixture");
     let direct = decode_es(&es, 1.0, true).pcm;
     let mut dec = Decoder::with_options(Options { drc_scale: 1.0 });
     let mut out = Vec::new();
@@ -295,54 +286,60 @@ fn stream_decoder_reassembles_split_frames() {
     assert_eq!(out, direct);
 }
 
+/// `RIVET_AC3_VECTORS`, or `None` (with a message) when it is not set —
+/// a failure instead when `RIVET_AC3_REQUIRE_VECTORS` is set.
 fn vectors_dir() -> Option<PathBuf> {
-    let dir = PathBuf::from(std::env::var_os("RIVET_AC3_VECTORS")?);
-    dir.is_dir().then_some(dir)
+    let dir = std::env::var_os("RIVET_AC3_VECTORS").map(PathBuf::from).filter(|d| d.is_dir());
+    if dir.is_none() {
+        assert!(
+            std::env::var_os("RIVET_AC3_REQUIRE_VECTORS").is_none(),
+            "RIVET_AC3_REQUIRE_VECTORS is set but RIVET_AC3_VECTORS does not name a directory \
+             (tools/make_vectors.sh and tools/fetch_dolby_kit.sh make it)"
+        );
+        eprintln!("RIVET_AC3_VECTORS not set — skipping the liba52 sweep");
+    }
+    dir
 }
 
-/// Every vector in `RIVET_AC3_VECTORS`, both with and without dynamic range
-/// compression, against libavcodec's f32 decode.
-#[test]
-fn ffmpeg_vector_sweep_matches_libavcodec() {
-    let Some(dir) = vectors_dir() else {
-        eprintln!("RIVET_AC3_VECTORS not set — skipping the libavcodec sweep");
-        return;
-    };
-    let mut names: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .unwrap()
+fn streams_in(dir: &Path) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut names: Vec<PathBuf> = rd
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| matches!(p.extension().and_then(|e| e.to_str()), Some("ac3" | "eac3")))
+        .filter(|p| matches!(p.extension().and_then(|e| e.to_str()), Some("ac3" | "eac3" | "ec3")))
         .collect();
     names.sort();
-    assert!(!names.is_empty(), "no .ac3/.eac3 vectors in {}", dir.display());
+    names
+}
+
+/// Every stream in `RIVET_AC3_VECTORS` (and its `dolby/` subdirectory) that
+/// has a liba52 reference beside it, both with and without dynamic range
+/// compression.
+#[test]
+fn vector_sweep_matches_liba52() {
+    let Some(dir) = vectors_dir() else { return };
+    let mut names = streams_in(&dir);
+    names.extend(streams_in(&dir.join("dolby")));
     let mut lines = Vec::new();
+    let mut checked = 0;
     for es_path in &names {
         let stem = es_path.file_stem().unwrap().to_string_lossy().to_string();
         let es = std::fs::read(es_path).unwrap();
         for (tag, drc) in [("drc1", 1.0f32), ("drc0", 0.0)] {
-            let ref_path = dir.join(format!("{stem}.{tag}.f32"));
+            let ref_path = es_path.with_file_name(format!("{stem}.{tag}.f32"));
             if !ref_path.is_file() {
                 continue;
             }
             let reference = read_f32le(&ref_path);
             let ours = decode_es(&es, drc, true);
-            if ours.truncated_tail {
-                // libavcodec conceals a cut-off final frame (it emits one
-                // frame of concealment); we drop it. Compare the common part.
-                let extra = reference.len().saturating_sub(ours.pcm.len());
-                assert!(
-                    extra <= 6 * 256 * ours.channels,
-                    "{stem}: libavcodec output is {extra} samples longer than ours, more than one frame"
-                );
-            } else {
-                assert_eq!(ours.pcm.len(), reference.len(), "{stem}: sample count differs from libavcodec");
-            }
-            let s = compare(&ours.pcm, &reference, ours.channels, &ours.mixed_blocks);
+            assert!(!ours.truncated_tail, "{stem}: the stream ends inside a syncframe");
+            assert_eq!(ours.pcm.len(), reference.len(), "{stem}: sample count differs from liba52");
+            let s = compare(&ours.pcm, &reference, ours.channels, mask(&ours));
             let noise = noise_floor(&es, drc, &ours);
             let name = format!("{stem}.{tag}");
             check(&name, &s, &noise, &ours);
+            checked += 1;
             lines.push(format!(
-                "{} noise rms={} peak={}; dithered {}/{}; dynrng {}/{}; features: {}",
+                "{} noise rms={} peak={}; dithered {}/{}; dynrng {}/{}; mixed-transform blocks {}; features: {}",
                 report(&name, &s),
                 noise.rms.iter().map(|f| format!("{:.3}", f / LSB16)).collect::<Vec<_>>().join("/"),
                 noise.peak.iter().map(|f| format!("{:.2}", f / LSB16)).collect::<Vec<_>>().join("/"),
@@ -350,10 +347,183 @@ fn ffmpeg_vector_sweep_matches_libavcodec() {
                 ours.dithered.1,
                 ours.drc.0,
                 ours.drc.1,
+                ours.mixed_blocks.len(),
                 ours.features
             ));
         }
     }
+    assert!(checked > 0, "no stream with a liba52 reference in {}", dir.display());
     // A summary the report can quote.
     std::fs::write(dir.join("ac3_sweep_report.txt"), lines.join("\n") + "\n").unwrap();
+}
+
+/// The Dolby kit's directory, when the sweep's directory has one; with
+/// `RIVET_AC3_REQUIRE_VECTORS` set it must.
+fn dolby_dir() -> Option<PathBuf> {
+    let dir = vectors_dir()?.join("dolby");
+    let ok = dir.join("ChID_voices_6ch_640kbps_dd.ac3").is_file();
+    assert!(
+        ok || std::env::var_os("RIVET_AC3_REQUIRE_VECTORS").is_none(),
+        "RIVET_AC3_REQUIRE_VECTORS is set but {} has no Dolby kit (tools/fetch_dolby_kit.sh)",
+        dir.display()
+    );
+    ok.then_some(dir)
+}
+
+/// Every Dolby-encoded stream in the kit decodes from end to end: every
+/// syncframe's CRC good, no decode error, no partial frame, and the channel
+/// count the file name gives.
+#[test]
+fn dolby_kit_streams_decode_clean() {
+    let Some(dir) = dolby_dir() else { return };
+    let names = streams_in(&dir);
+    assert!(names.len() >= 10, "expected the kit's 12 AC-3 / E-AC-3 streams, found {}", names.len());
+    for path in &names {
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let d = decode_es(&std::fs::read(path).unwrap(), 1.0, true);
+        let want = if name.contains("_2ch_") { 2 } else { 6 };
+        assert_eq!(d.channels, want, "{name}: channels");
+        assert!(!d.truncated_tail, "{name}: ends inside a syncframe");
+        assert_eq!(d.pcm.len(), d.frames * 1536 * want, "{name}: 1536 samples per channel per syncframe");
+        println!("{name}: {} frames; features: {}", d.frames, d.features);
+    }
+}
+
+/// An in-place iterative radix-2 FFT (`re.len()` a power of two).
+fn fft(re: &mut [f64], im: &mut [f64]) {
+    let n = re.len();
+    let mut j = 0;
+    for i in 1..n {
+        let mut bit = n >> 1;
+        while j & bit != 0 {
+            j ^= bit;
+            bit >>= 1;
+        }
+        j |= bit;
+        if i < j {
+            re.swap(i, j);
+            im.swap(i, j);
+        }
+    }
+    let mut len = 2;
+    while len <= n {
+        let ang = -2.0 * std::f64::consts::PI / len as f64;
+        for start in (0..n).step_by(len) {
+            for k in 0..len / 2 {
+                let (wr, wi) = ((ang * k as f64).cos(), (ang * k as f64).sin());
+                let (a, b) = (start + k, start + k + len / 2);
+                let tr = re[b] * wr - im[b] * wi;
+                let ti = re[b] * wi + im[b] * wr;
+                re[b] = re[a] - tr;
+                im[b] = im[a] - ti;
+                re[a] += tr;
+                im[a] += ti;
+            }
+        }
+        len <<= 1;
+    }
+}
+
+/// Energy of channel `c` of interleaved `pcm` in each band `[edges[i],
+/// edges[i + 1])` Hz, from Hann-windowed 4096-point spectra summed over
+/// the signal.
+fn band_energy(pcm: &[f32], channels: usize, c: usize, edges: &[f64]) -> Vec<f64> {
+    const N: usize = 4096;
+    let frames = pcm.len() / channels / N;
+    let window: Vec<f64> = (0..N).map(|i| 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / N as f64).cos()).collect();
+    let mut power = vec![0.0f64; N / 2 + 1];
+    for f in 0..frames {
+        let mut re: Vec<f64> = (0..N).map(|i| f64::from(pcm[(f * N + i) * channels + c]) * window[i]).collect();
+        let mut im = vec![0.0f64; N];
+        fft(&mut re, &mut im);
+        for (k, p) in power.iter_mut().enumerate() {
+            *p += re[k] * re[k] + im[k] * im[k];
+        }
+    }
+    edges
+        .windows(2)
+        .map(|b| {
+            power
+                .iter()
+                .enumerate()
+                .filter(|(k, _)| {
+                    let hz = *k as f64 * 48_000.0 / N as f64;
+                    hz >= b[0] && hz < b[1]
+                })
+                .map(|(_, p)| p)
+                .sum()
+        })
+        .collect()
+}
+
+fn db(x: f64) -> f64 {
+    10.0 * x.max(1e-30).log10()
+}
+
+/// Dolby's E-AC-3 encode of its channel-identification programme (5.1 at
+/// 256 kbit/s: spectral extension, AHT with VQ / GAQ / large mantissas,
+/// coupling, `dynrng`) against liba52's decode of Dolby's AC-3 encode of the
+/// same programme (5.1 at 640 kbit/s). No E-AC-3 decoder but FFmpeg's exists
+/// to compare with, and the two encodes are lossy in different ways, so this
+/// is not a sample-level match; it is what only a correct decode of both
+/// reaches. Both decoded without dynrng:
+///
+/// - aligned: the cross-correlation of the front left peaks at lag 0;
+/// - per full-bandwidth channel, waveform SNR ≥ 15 dB (measured 16.8–22.0),
+///   level within 0.5 dB, and the energy in each band up to 16 kHz within
+///   3 dB (measured ≤ 2.2 dB; the band above is the 256 kbit/s stream's
+///   bandwidth limit) — a channel swap, a wrong SPX band or a broken AHT
+///   inverse is tens of dB;
+/// - the LFE's energy below 250 Hz within 1.5 dB.
+#[test]
+fn dolby_eac3_matches_dolby_ac3_of_same_programme() {
+    let Some(dir) = dolby_dir() else { return };
+    let eac3 = decode_es(&std::fs::read(dir.join("ChID_voices_6ch_256kbps_ddp.ec3")).unwrap(), 0.0, true);
+    let h = eac3.header.expect("header");
+    assert!(h.acmod == 7 && h.lfeon, "5.1 expected");
+    let f = &eac3.features;
+    assert!(f.spx_blocks > 0 && f.aht_channels > 0 && f.gaq_channels > 0, "the stream should exercise SPX, AHT and GAQ: {f}");
+    let reference = read_f32le(&dir.join("ChID_voices_6ch_640kbps_dd.drc0.f32"));
+    let n = (eac3.pcm.len().min(reference.len())) / 6;
+    assert!(eac3.pcm.len().abs_diff(reference.len()) <= 1536 * 6, "lengths differ by more than a frame");
+    let (ours, theirs) = (&eac3.pcm[..n * 6], &reference[..n * 6]);
+
+    // Alignment, on the first ten seconds of the front left.
+    let span = (10 * 48_000).min(n - 2048);
+    let xcorr = |lag: isize| -> f64 {
+        (2048..span).map(|i| f64::from(ours[i * 6]) * f64::from(theirs[(i as isize + lag) as usize * 6])).sum()
+    };
+    let at0 = xcorr(0);
+    for lag in [-1536, -512, -256, -1, 1, 256, 512, 1024] {
+        assert!(at0 > xcorr(lag), "cross-correlation at lag {lag} beats lag 0");
+    }
+
+    let edges = [0.0, 250.0, 500.0, 1000.0, 2000.0, 3000.0, 4000.0, 6000.0, 8000.0, 10000.0, 12000.0, 14000.0, 16000.0];
+    for c in 0..6 {
+        let (mut sig, mut err, mut e_ours) = (0.0f64, 0.0f64, 0.0f64);
+        for i in 0..n {
+            let (a, b) = (f64::from(theirs[i * 6 + c]), f64::from(ours[i * 6 + c]));
+            sig += a * a;
+            e_ours += b * b;
+            err += (a - b) * (a - b);
+        }
+        let ba = band_energy(theirs, 6, c, &edges);
+        let bo = band_energy(ours, 6, c, &edges);
+        let bands: Vec<f64> = ba.iter().zip(&bo).map(|(a, o)| db(o / a)).collect();
+        let snr = db(sig / err);
+        let level = db(e_ours / sig);
+        println!(
+            "ch{c}: SNR {snr:.1} dB, level {level:+.2} dB, bands {}",
+            bands.iter().map(|b| format!("{b:+.1}")).collect::<Vec<_>>().join(" ")
+        );
+        if c == 3 {
+            assert!(bands[0].abs() <= 1.5, "LFE below 250 Hz off by {:.2} dB", bands[0]);
+            continue;
+        }
+        assert!(snr >= 15.0, "ch{c}: SNR {snr:.1} dB against the AC-3 encode");
+        assert!(level.abs() <= 0.5, "ch{c}: level off by {level:.2} dB");
+        for (b, d) in bands.iter().enumerate() {
+            assert!(d.abs() <= 3.0, "ch{c}: band {}–{} Hz off by {d:.2} dB", edges[b], edges[b + 1]);
+        }
+    }
 }
