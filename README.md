@@ -1,6 +1,6 @@
 # rivet-ac3
 
-[![CI](https://github.com/rivet-transcoder/rivet-ac3/actions/workflows/ci.yml/badge.svg)](https://github.com/rivet-transcoder/rivet-ac3/actions/workflows/ci.yml)
+[![CI](https://github.com/safewords/rivet-ac3/actions/workflows/ci.yml/badge.svg)](https://github.com/safewords/rivet-ac3/actions/workflows/ci.yml)
 
 An **AC-3 / E-AC-3** (Dolby Digital / Dolby Digital Plus) **decoder and
 encoder** in Rust: no C, no system libraries, no build script, nothing to
@@ -15,7 +15,7 @@ with or without LFE and 7.1 through a dependent substream; every frame it
 writes in the tests is checked field by field against the spec
 ([below](#how-the-encoder-is-checked)).
 
-Written for the **[rivet](https://github.com/rivet-transcoder/rivet)**
+Written for the **[rivet](https://github.com/safewords/rivet)**
 transcoder, where it is the AC-3 decoder: what lets a 5.1 AC-3 or E-AC-3
 track from MP4, Matroska or MPEG-TS be downmixed, filtered or transcoded to
 Opus, AAC, MP3, FLAC or ALAC. It was written in the rivet repository first
@@ -28,7 +28,7 @@ dependency (`thiserror`); an optional `tracing` feature; no build script.
 
 ```toml
 [dependencies]
-ac3 = { package = "rivet-ac3", git = "https://github.com/rivet-transcoder/rivet-ac3", branch = "develop" }
+ac3 = { package = "rivet-ac3", git = "https://github.com/safewords/rivet-ac3", branch = "develop" }
 ```
 
 ## What it decodes
