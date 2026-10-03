@@ -39,7 +39,8 @@ fn bit(frame: &[u8], pos: usize) -> bool {
 struct Decoded {
     /// Interleaved PCM of independent substream 0, in decoder output order.
     pcm: Vec<f32>,
-    /// Interleaved PCM of the 7.1 dependent substream (BL BR), if any.
+    /// Interleaved PCM of the 7.1 dependent substream decoded on its own
+    /// (its four coded channels SL SR BL BR, in that order), if any.
     dep: Vec<f32>,
     /// Channels in `pcm`.
     channels: usize,
@@ -106,7 +107,14 @@ fn check_stream(cfg: &Config, aus: &[Vec<u8>]) -> Decoded {
                 }
                 channels = expect;
             } else {
-                assert_eq!((h.acmod, h.lfeon), (2, false));
+                // §E.2.8.2: a 2/2 dependent substream, custom channel map
+                // Ls, Rs, Lrs/Rrs pair (Table E.1.4 bits 3, 4, 6). No
+                // `compr` is sent, so `chanmape` is bsi bit 51.
+                assert_eq!((h.acmod, h.lfeon), (6, false));
+                assert!(!bit(frame, 50), "frame {n}: compre");
+                assert!(bit(frame, 51), "frame {n}: chanmape");
+                let chanmap = (52..68).fold(0u16, |m, b| (m << 1) | u16::from(bit(frame, b)));
+                assert_eq!(chanmap, 0b0001_1010_0000_0000, "frame {n}: chanmap");
             }
             let d = if sub == 0 { &mut dec } else { &mut dep_dec };
             let mut pcm = Vec::new();
@@ -245,12 +253,15 @@ fn roundtrip(cfg: Config) -> (Vec<f64>, Decoded) {
     let (from, to) = (1536, n - 1536);
     let spk = cfg.layout.speakers(cfg.lfe);
     let main = if cfg.layout == Layout::ThreeFour { Layout::ThreeTwo.speakers(cfg.lfe) } else { spk.clone() };
+    // 7.1: the fronts and the LFE from substream 0, the surrounds from the
+    // dependent substream (substream 0's are the downmix they replace).
+    let dep = [Speaker::SL, Speaker::SR, Speaker::BL, Speaker::BR];
     let s = spk
         .iter()
         .enumerate()
-        .map(|(c, sp)| match main.iter().position(|m| m == sp) {
-            Some(g) => snr(&pcm, c, nch, &d.pcm, g, main.len(), from, to),
-            None => snr(&pcm, c, nch, &d.dep, usize::from(*sp == Speaker::BR), 2, from, to),
+        .map(|(c, sp)| match dep.iter().position(|m| m == sp).filter(|_| cfg.layout == Layout::ThreeFour) {
+            Some(g) => snr(&pcm, c, nch, &d.dep, g, 4, from, to),
+            None => snr(&pcm, c, nch, &d.pcm, main.iter().position(|m| m == sp).unwrap(), main.len(), from, to),
         })
         .collect();
     (s, d)
@@ -385,8 +396,10 @@ fn round_trip_snr() {
         match (k.layout, k.kbps) {
             (Stereo, 96 | 128) => assert!(coupled && f.phsflg_blocks > 0 && f.remat_blocks > 0, "{f}"),
             (Stereo, _) => assert!(!coupled && f.remat_blocks > 0, "{f}"),
-            (ThreeTwo, 384 | 448) => assert!(coupled, "{f}"),
-            (ThreeTwo, _) | (ThreeFour, _) | (Mono, _) | (DualMono, _) => assert!(!coupled, "{f}"),
+            // 7.1 codes nine channels and the LFE (substream 0's 5.1
+            // downmix, then SL SR BL BR): about 83 kbit/s a channel at 768.
+            (ThreeTwo, 384 | 448) | (ThreeFour, 768) => assert!(coupled, "{f}"),
+            (ThreeTwo, _) | (Mono, _) | (DualMono, _) => assert!(!coupled, "{f}"),
             _ => {}
         }
         // the 1.8 kHz plucks after silence-free music are not transients at
@@ -572,9 +585,10 @@ fn tone_amplitude(x: &[f32], freq: f64, fs: u32) -> f64 {
     2.0 * (s1 * s1 + s2 * s2 - 2.0 * w.cos() * s1 * s2).sqrt() / x.len() as f64
 }
 
-/// 7.1 through `ac3::Decoder`: the dependent substream's back surrounds
-/// join the independent substream's 5.1 as eight channels, FL FR FC LFE BL
-/// BR SL SR, each speaker's own tone in its own slot and no other there —
+/// 7.1 through `ac3::Decoder`: the dependent substream's side surrounds
+/// replace the independent substream's downmixed ones and its back
+/// surrounds join them, eight channels FL FR FC LFE BL BR SL SR, each
+/// speaker's own tone in its own slot at 0 dB and every other below −60 dB —
 /// whether the decoder is handed whole access units, one byte string, or
 /// bytes cut anywhere (between the two substreams included).
 #[test]
@@ -637,6 +651,58 @@ fn seven_one_decodes_to_eight_channels_each_in_its_place() {
             20.0 * (worst.1 / 0.25).log10()
         );
         assert!((20.0 * (level / 0.25).log10()).abs() < 1.0, "{}: its own tone at {level:.4}", speakers[c]);
-        assert!(worst.1 < 0.25 * 0.01, "{}: {} Hz at {:.4}", speakers[c], worst.0, worst.1);
+        assert!(worst.1 < 0.25 * 0.001, "{}: {} Hz at {:.4}", speakers[c], worst.0, worst.1);
+    }
+}
+
+/// ETSI TS 102 366 §E.2.8.2: independent substream 0 of a 7.1 programme is
+/// its 5.1 downmix, so a decoder that plays substream 0 alone (as a 5.1
+/// system does) still has every channel. Each front and the LFE carry their
+/// own tone at 0 dB; each surround carries its side surround's and its back
+/// surround's tones at −3 dB each (Table H.3.9 `dmixtyp` 1: Ls' = −3 dB × Ls
+/// + −3 dB × Lrs); every other tone is below −60 dB.
+#[test]
+fn seven_one_substream_zero_is_a_five_one_downmix() {
+    use Speaker::*;
+    let cfg = Config::new(Format::Eac3, 48_000, Layout::ThreeFour, true, 768);
+    let speakers = Layout::ThreeFour.speakers(true);
+    let tones = [400.0, 600.0, 800.0, 50.0, 1000.0, 1200.0, 1400.0, 1600.0];
+    let tone_of = |s: Speaker| tones[speakers.iter().position(|&x| x == s).unwrap()];
+    let n = 48_000;
+    let pcm: Vec<f32> =
+        (0..n * 8).map(|i| (0.25 * (std::f64::consts::TAU * tones[i % 8] * (i / 8) as f64 / 48_000.0).sin()) as f32).collect();
+    let aus = encode(cfg, &pcm);
+    let mut dec = ac3::Decoder::new();
+    dec.set_independent_only(true);
+    let mut frames = Vec::new();
+    for au in &aus {
+        frames.extend(dec.decode(au).unwrap());
+    }
+    frames.extend(dec.flush().unwrap());
+    assert_eq!(frames.len(), aus.len());
+    let five_one = vec![FL, FR, FC, LFE, SL, SR];
+    for f in &frames {
+        assert_eq!((f.channels, f.speakers()), (6, five_one.clone()));
+    }
+    let out: Vec<f32> = frames.iter().flat_map(|f| f.samples.iter().copied()).collect();
+    let from = 6 * 4800;
+    let db = |a: f64| 20.0 * (a / 0.25).log10();
+    let minus3 = 20.0 * std::f64::consts::FRAC_1_SQRT_2.log10();
+    for (c, &spk) in five_one.iter().enumerate() {
+        let ch: Vec<f32> = out[from..].iter().skip(c).step_by(6).copied().take(38_400).collect();
+        let (want, gain): (Vec<Speaker>, f64) = match spk {
+            SL => (vec![SL, BL], minus3),
+            SR => (vec![SR, BR], minus3),
+            s => (vec![s], 0.0),
+        };
+        for &s in &want {
+            let level = db(tone_amplitude(&ch, tone_of(s), 48_000));
+            eprintln!("7.1 substream 0 {spk}: {s}'s tone at {level:+.2} dB (want {gain:+.2})");
+            assert!((level - gain).abs() < 0.5, "{spk}: {s}'s tone at {level:+.2} dB, want {gain:+.2}");
+        }
+        for &t in tones.iter().filter(|&&t| !want.iter().any(|&s| tone_of(s) == t)) {
+            let level = db(tone_amplitude(&ch, t, 48_000));
+            assert!(level < -60.0, "{spk}: {t} Hz at {level:.1} dB");
+        }
     }
 }

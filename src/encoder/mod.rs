@@ -47,10 +47,14 @@ pub enum Layout {
     TwoTwo,
     /// 3/2: FL FR FC SL SR (5.1 with the LFE: FL FR FC LFE SL SR).
     ThreeTwo,
-    /// 3/4, E-AC-3 only (7.1 with the LFE: FL FR FC LFE BL BR SL SR): a 3/2
-    /// independent substream carrying FL FR FC SL SR (and the LFE) plus a
-    /// 2/0 dependent substream carrying BL BR, custom channel map
-    /// "Lrs/Rrs pair" (Annex E Table E2.5).
+    /// 3/4, E-AC-3 only (7.1 with the LFE: FL FR FC LFE BL BR SL SR), as
+    /// ETSI TS 102 366 §E.2.8.2 lays a programme of more than 5.1 channels
+    /// out: independent substream 0 carries a 5.1 downmix of the whole
+    /// programme (L C R, the LFE, and surrounds Ls' = −3 dB·SL + −3 dB·BL,
+    /// Rs' = −3 dB·SR + −3 dB·BR, the Table H.3.9 `dmixtyp` 1 downmix), so a
+    /// 5.1 decoder plays every channel; a 2/2 dependent substream with the
+    /// custom channel map Ls, Rs, Lrs/Rrs pair (Table E.1.4 bits 3, 4 and 6)
+    /// carries SL SR, which replace the downmixed surrounds, and BL BR.
     ThreeFour,
 }
 
@@ -159,8 +163,9 @@ impl Config {
 /// input, and its frame size bookkeeping.
 struct Sub {
     enc: SubEncoder,
-    /// Input slot of each coded channel (fbw in `acmod` order, then LFE).
-    slots: Vec<usize>,
+    /// Each coded channel (fbw in `acmod` order, then LFE) as a sum of
+    /// input channels: (input slot, gain).
+    mix: Vec<Vec<(usize, f32)>>,
     /// Frame size: words per frame are `num / den`, rounded so the running
     /// total never drifts (the 44.1 kHz alternation of Table 5.18).
     num: u128,
@@ -297,11 +302,12 @@ impl Encoder {
                 }
                 let split: Vec<(u8, bool, f32)> = if cfg.layout == Layout::ThreeFour {
                     // shared by channel count (the LFE as a quarter), the
-                    // dependent substream taking the exact remainder
+                    // dependent substream (four channels) taking the exact
+                    // remainder
                     let ind = 5.0 + if cfg.lfe { 0.25 } else { 0.0 };
                     let k = cfg.bitrate_kbps as f32;
-                    let main = (k * ind / (ind + 2.0)).round();
-                    vec![(7, cfg.lfe, main), (2, false, k - main)]
+                    let main = (k * ind / (ind + 4.0)).round();
+                    vec![(7, cfg.lfe, main), (6, false, k - main)]
                 } else {
                     vec![(cfg.layout.acmod(), cfg.lfe, cfg.bitrate_kbps as f32)]
                 };
@@ -314,7 +320,7 @@ impl Encoder {
                 };
                 numblks = nb;
                 for (i, &(acmod, lfe, kbps)) in split.iter().enumerate() {
-                    let (strmtyp, chanmap) = if i == 0 { (0, None) } else { (1, Some(0x0200u16)) };
+                    let (strmtyp, chanmap) = if i == 0 { (0, None) } else { (1, Some(SEVEN_ONE_CHANMAP)) };
                     subs.push(make_sub(&cfg, fscod, acmod, lfe, kbps.round() as u32, nb, strmtyp, chanmap, 0, &speakers, Some(i))?);
                 }
             }
@@ -328,7 +334,7 @@ impl Encoder {
             let fl = numblks * 256;
             let mut seed = 0x1234_5678u32;
             let pcm: Vec<Vec<f32>> = sub
-                .slots
+                .mix
                 .iter()
                 .map(|_| {
                     (0..fl)
@@ -409,7 +415,13 @@ impl Encoder {
         while self.buf[0].len() >= fl {
             let mut au = Vec::new();
             for sub in &mut self.subs {
-                let pcm: Vec<Vec<f32>> = sub.slots.iter().map(|&s| self.buf[s][..fl].to_vec()).collect();
+                let pcm: Vec<Vec<f32>> = sub
+                    .mix
+                    .iter()
+                    .map(|terms| {
+                        (0..fl).map(|i| terms.iter().map(|&(s, g)| g * self.buf[s][i]).sum()).collect()
+                    })
+                    .collect();
                 let words = sub.next_words();
                 au.extend_from_slice(&sub.enc.encode_frame(&pcm, words)?);
             }
@@ -422,6 +434,15 @@ impl Encoder {
         Ok(out)
     }
 }
+
+/// The 7.1 dependent substream's custom channel map (ETSI TS 102 366
+/// Table E.1.4, bit 0 the most significant): Left Surround (bit 3), Right
+/// Surround (bit 4), Lrs/Rrs pair (bit 6) — the §E.1.3.1.8 example layout.
+pub(crate) const SEVEN_ONE_CHANMAP: u16 = (0x8000 >> 3) | (0x8000 >> 4) | (0x8000 >> 6);
+
+/// −3 dB, the gain of each term of the Table H.3.9 `dmixtyp` 1 downmix
+/// (Ls' = −3 dB × Ls + −3 dB × Lrs) that 7.1's substream 0 carries.
+pub(crate) const SURROUND_DOWNMIX: f32 = std::f32::consts::FRAC_1_SQRT_2;
 
 #[allow(clippy::too_many_arguments)]
 fn make_sub(
@@ -437,22 +458,34 @@ fn make_sub(
     speakers: &[Speaker],
     sub_index: Option<usize>,
 ) -> Result<Sub, Error> {
+    use Speaker::{BL, BR, SL, SR};
     let nf = crate::decoder::nfchans_for(acmod);
-    // Input slots of the coded channels: the decoder's output order maps
-    // output slot → coded channel; invert it over this substream's speakers.
-    let order = crate::decoder::output_order(acmod, lfe);
-    let sub_speakers: Vec<Speaker> = match sub_index {
-        Some(1) => vec![Speaker::BL, Speaker::BR],
-        _ if cfg.layout == Layout::ThreeFour => Layout::ThreeTwo.speakers(lfe),
-        _ => speakers.to_vec(),
+    let input = |spk: Speaker| speakers.iter().position(|&s| s == spk).expect("speaker in layout");
+    let seven_one = cfg.layout == Layout::ThreeFour;
+    let mix: Vec<Vec<(usize, f32)>> = if seven_one && sub_index == Some(1) {
+        // The dependent substream, in the order of its chanmap's set bits:
+        // Ls, Rs (replacing substream 0's downmixed surrounds), Lrs/Rrs.
+        [SL, SR, BL, BR].into_iter().map(|s| vec![(input(s), 1.0)]).collect()
+    } else {
+        // Input slots of the coded channels: the decoder's output order maps
+        // output slot → coded channel; invert it over this substream's
+        // speakers.
+        let order = crate::decoder::output_order(acmod, lfe);
+        let sub_speakers = if seven_one { Layout::ThreeTwo.speakers(lfe) } else { speakers.to_vec() };
+        let mut mix = vec![Vec::new(); nf + usize::from(lfe)];
+        for (out_slot, &coded) in order.iter().enumerate() {
+            let spk = sub_speakers[out_slot];
+            let idx = if coded == LFE { nf } else { coded };
+            mix[idx] = match spk {
+                // §E.2.8.2: substream 0 of a 7.1 programme is its 5.1
+                // downmix — the back surrounds folded into the surrounds.
+                SL if seven_one => vec![(input(SL), SURROUND_DOWNMIX), (input(BL), SURROUND_DOWNMIX)],
+                SR if seven_one => vec![(input(SR), SURROUND_DOWNMIX), (input(BR), SURROUND_DOWNMIX)],
+                _ => vec![(input(spk), 1.0)],
+            };
+        }
+        mix
     };
-    let mut slots = vec![usize::MAX; nf + usize::from(lfe)];
-    for (out_slot, &coded) in order.iter().enumerate() {
-        let spk = sub_speakers[out_slot];
-        let input = speakers.iter().position(|&s| s == spk).expect("speaker in layout");
-        let idx = if coded == LFE { nf } else { coded };
-        slots[idx] = input;
-    }
     let t = tune(kbps as f32, nf, lfe, acmod, cfg.sample_rate, cfg.coupling);
     let p = Params {
         eac3: cfg.format == Format::Eac3,
@@ -476,7 +509,7 @@ fn make_sub(
     };
     Ok(Sub {
         enc: SubEncoder::new(p),
-        slots,
+        mix,
         num: u128::from(kbps) * 1000 * (numblks as u128 * 256),
         den: u128::from(cfg.sample_rate) * 16,
         words_out: 0,

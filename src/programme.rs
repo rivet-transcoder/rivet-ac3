@@ -1,19 +1,24 @@
-//! An E-AC-3 programme assembled from its substreams (A/52:2018 Annex E):
-//! independent substream 0 and the dependent substreams that follow it in
-//! the same span of time, each decoded by a [`FrameDecoder`] of its own, the
-//! dependent substreams' channels put where their channel map says.
+//! An E-AC-3 programme assembled from its substreams (ETSI TS 102 366
+//! §E.2.8): independent substream 0 and the dependent substreams that follow
+//! it in the same span of time, each decoded by a [`FrameDecoder`] of its
+//! own, the dependent substreams' channels put where their channel map says.
 //!
-//! A dependent substream carries channels of the same programme: with its
-//! `chanmape` clear, the channels its own `acmod` / `lfeon` name, which
-//! replace the independent substream's channels of those names; with it
-//! set, the locations `chanmap` names (Annex E Table E2.5, bit 0 the
-//! field's most significant), which add to the programme or replace a
-//! channel already there. The coded channels are assigned to the set bits
-//! in order — the full-bandwidth channels in coding order to the
-//! full-bandwidth locations (a pair location taking two), the LFE channel to
-//! the LFE location. A 7.1 programme is the usual case: a 3/2 independent
-//! substream (L C R Ls Rs, LFE) and a 2/0 dependent substream mapped to the
-//! Lrs/Rrs pair, the back surrounds.
+//! §E.2.8.2: a dependent substream carries channels that replace or
+//! supplement those of independent substream 0. With its `chanmape` clear,
+//! the channels its own `acmod` / `lfeon` name overwrite the independent
+//! substream's channels of those names; with it set, the locations
+//! `chanmap` names (Table E.1.4, bit 0 the field's most significant), a
+//! location substream 0 already has replacing that channel, any other
+//! adding one. The coded channels are assigned to the set bits in order —
+//! the full-bandwidth channels in coding order to the full-bandwidth
+//! locations (a pair location taking two), the LFE channel to the LFE
+//! location. A 7.1 programme is the usual case: substream 0 is a 5.1
+//! downmix of it (L C R Ls Rs, LFE, the back surrounds folded into the
+//! surrounds), and a 2/2 dependent substream mapped to Ls, Rs and the
+//! Lrs/Rrs pair puts the discrete side surrounds in place of the downmixed
+//! ones and adds the back surrounds. (A 2/0 dependent substream mapped to
+//! Lrs/Rrs alone, adding the back surrounds to a discrete 5.1, is assembled
+//! the same way.)
 
 use crate::bits::BitReader;
 use crate::decoder::{Header, coded_output_channels};
@@ -58,15 +63,37 @@ fn coded_speakers(acmod: u8) -> &'static [Speaker] {
     }
 }
 
+/// The channel locations of the 16 `chanmap` bits, bit 0 (the field's most
+/// significant bit) first: ETSI TS 102 366 Table E.1.4.
+const CHANMAP_LOCATIONS: [&str; 16] = [
+    "Left",
+    "Centre",
+    "Right",
+    "Left Surround",
+    "Right Surround",
+    "Lc/Rc pair",
+    "Lrs/Rrs pair",
+    "Cs",
+    "Ts",
+    "Lsd/Rsd pair",
+    "Lw/Rw pair",
+    "Vhl/Vhr pair",
+    "Vhc",
+    "Lts/Rts pair",
+    "LFE2",
+    "LFE",
+];
+
+/// The `chanmap` bit of the LFE location (bit 15, the least significant).
+const CHANMAP_LFE: u16 = 1;
+
 /// The full-bandwidth locations a `chanmap` names, in bit order, a pair as
-/// two; `Err` naming the first location this decoder has no output for.
+/// two (the LFE location, bit 15, is not one of them); `Err` naming the
+/// first location this decoder has no output for.
 fn chanmap_locations(chanmap: u16) -> Result<Vec<Speaker>, String> {
     use Speaker::*;
-    const NAMES: [&str; 15] = [
-        "L", "C", "R", "Ls", "Rs", "Lc/Rc", "Lrs/Rrs", "Cs", "Ts", "Lsd/Rsd", "Lw/Rw", "Lvh/Rvh", "Cvh", "reserved", "LFE2",
-    ];
     let mut out = Vec::new();
-    for (bit, name) in NAMES.iter().enumerate() {
+    for (bit, name) in CHANMAP_LOCATIONS[..15].iter().enumerate() {
         if chanmap & (0x8000 >> bit) == 0 {
             continue;
         }
@@ -120,8 +147,10 @@ pub(crate) fn merge(base: &mut Frame, pcm: &[f32], hdr: &Header, chanmap: Option
     let fbw: Vec<Speaker> = match chanmap {
         Some(m) => {
             let locations = chanmap_locations(m)?;
-            if hdr.lfeon && m & 1 == 0 {
-                return Err("an LFE channel and no LFE location in the chanmap".into());
+            // §E.1.3.1.8: the locations named are the coded channels, the
+            // LFE among them.
+            if hdr.lfeon != (m & CHANMAP_LFE != 0) {
+                return Err(format!("lfeon {} against the chanmap's LFE bit", u8::from(hdr.lfeon)));
             }
             locations
         }
@@ -170,5 +199,28 @@ mod tests {
         assert_eq!(chanmap_locations(0xA000), Ok(vec![Speaker::FL, Speaker::FR]));
         assert_eq!(chanmap_locations(0x0100), Ok(vec![Speaker::BC]));
         assert!(chanmap_locations(0x0400).unwrap_err().contains("Lc/Rc"));
+        // The LFE location is not a full-bandwidth one.
+        assert_eq!(chanmap_locations(0x0201), Ok(vec![Speaker::BL, Speaker::BR]));
+        // The 7.1 encoder's map: Ls, Rs, then the Lrs/Rrs pair.
+        assert_eq!(
+            chanmap_locations(crate::encoder::SEVEN_ONE_CHANMAP),
+            Ok(vec![Speaker::SL, Speaker::SR, Speaker::BL, Speaker::BR])
+        );
+    }
+
+    /// Table E.1.4, every bit: the locations by name, bit 13 the Lts/Rts
+    /// pair (top surrounds), and each one this decoder has no output for
+    /// refused by that name.
+    #[test]
+    fn chanmap_names_follow_table_e_1_4() {
+        assert_eq!(CHANMAP_LOCATIONS[11], "Vhl/Vhr pair");
+        assert_eq!(CHANMAP_LOCATIONS[12], "Vhc");
+        assert_eq!(CHANMAP_LOCATIONS[13], "Lts/Rts pair");
+        assert_eq!(CHANMAP_LOCATIONS[14], "LFE2");
+        assert_eq!(CHANMAP_LOCATIONS[15], "LFE");
+        for bit in [5usize, 8, 9, 10, 11, 12, 13, 14] {
+            let e = chanmap_locations(0x8000 >> bit).unwrap_err();
+            assert!(e.contains(CHANMAP_LOCATIONS[bit]), "bit {bit}: {e}");
+        }
     }
 }

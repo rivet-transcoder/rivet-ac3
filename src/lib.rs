@@ -4,7 +4,9 @@
 //! Decoding: [`Decoder`] / [`FrameDecoder`], below. Encoding: [`Encoder`],
 //! configured by [`Config`] — AC-3 at every Table 5.18 bit rate and E-AC-3
 //! from 32 to 6144 kbit/s, every audio coding mode with or without LFE, 7.1
-//! as an E-AC-3 dependent substream. Input to the encoder is interleaved
+//! as ETSI TS 102 366 §E.2.8.2 lays it out (a 5.1 downmix in independent
+//! substream 0, a dependent substream with the channels that replace or
+//! extend it). Input to the encoder is interleaved
 //! `f32` in the order the decoder outputs ([`Layout::speakers`]):
 //!
 //! ```
@@ -28,7 +30,10 @@
 //!   allocation, dynamic range compression (`dynrng`, applied by default,
 //!   scalable through [`Options::drc_scale`]).
 //! - E-AC-3 (bsid 16): independent substream 0 and its dependent
-//!   substreams (7.1 as eight channels, through [`Decoder`]) — all `numblkscod` frame
+//!   substreams, whose channels replace or supplement substream 0's as
+//!   ETSI TS 102 366 §E.2.8.2 says (7.1 as eight channels, through
+//!   [`Decoder`]; [`Decoder::set_independent_only`] for substream 0's 5.1
+//!   alone, the downmix a 5.1 system plays) — all `numblkscod` frame
 //!   sizes, reduced sample rates, frame-based exponent strategies, the three
 //!   SNR-offset strategies, standard coupling, spectral extension (with
 //!   attenuation), and the adaptive hybrid transform (vector quantisation
@@ -212,6 +217,8 @@ pub struct Decoder {
     has_dependents: bool,
     /// The last independent syncframe was substream 0's.
     after_independent_zero: bool,
+    /// Skip the dependent substreams (§E.2.8.2's 5.1-or-fewer decoder).
+    independent_only: bool,
     buf: Vec<u8>,
 }
 
@@ -236,8 +243,18 @@ impl Decoder {
             pending: None,
             has_dependents: false,
             after_independent_zero: false,
+            independent_only: false,
             buf: Vec::new(),
         }
+    }
+
+    /// Decode independent substream 0 alone and skip its dependent
+    /// substreams — what ETSI TS 102 366 §E.2.8.2 has a decoder reproducing
+    /// 5.1 or fewer channels do. Substream 0 of a programme of more than 5.1
+    /// channels is its 5.1 downmix, so a 7.1 stream comes out as that 5.1.
+    /// Off by default: the whole programme is decoded.
+    pub fn set_independent_only(&mut self, enabled: bool) {
+        self.independent_only = enabled;
     }
 
     /// The header of the most recent syncframe decoded, if any.
@@ -347,7 +364,7 @@ impl Decoder {
                 // A dependent substream: of independent substream 0 when it
                 // follows that one (substream ids number the dependent
                 // substreams of the independent substream before them).
-                if self.after_independent_zero {
+                if self.after_independent_zero && !self.independent_only {
                     self.add_dependent(&frame, hdr.substreamid)?;
                 }
                 continue;
@@ -365,7 +382,7 @@ impl Decoder {
                         layout: h.speakers(),
                         header: h,
                     };
-                    if h.eac3 {
+                    if h.eac3 && !self.independent_only {
                         self.pending = Some((f, false));
                     } else {
                         frames.push(f);
