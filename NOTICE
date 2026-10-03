@@ -29,11 +29,14 @@ and bit allocation routine. Its tests check its output against the
 standard and decode it with this crate's decoder; no other encoder or
 decoder is run by them.
 
-The decoder is verified against libavcodec's decoder, used only as a black
-box (the ffmpeg command-line tool, whose PCM output is compared); none of its
-code is included or was consulted. The committed test stream in tests/data
-was made by ffmpeg's AC-3 encoder, run the same way, and its reference PCM
-by ffmpeg's decoder; they are tool output only.
+The decoder is verified against liba52's decoder (through GStreamer's
+a52dec element), used only as a black box whose PCM output is compared, on
+streams made by the aften encoder, run the same way, and on Dolby's
+published test streams (the Dolby Digital Plus Online Delivery Kit, fetched
+at test time by tools/fetch_dolby_kit.sh, not redistributed here). None of
+their code is included or was consulted. The committed test stream in
+tests/data was made by aften and its reference PCM by liba52; they are tool
+output only. FFmpeg is not used, in the tests or anywhere else.
 
 ------------------------------------------------------------------------------
 Patents and trademarks

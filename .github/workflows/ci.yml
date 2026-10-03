@@ -27,10 +27,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release
-      # The committed 5.1 fixture is checked against libavcodec's decode of
-      # it on every run. The full sweep (ffmpeg-made vectors and Dolby-encoded
-      # FATE streams, tests/data/ac3_make_vectors.sh) runs only where
-      # RIVET_AC3_VECTORS points at them, and skips here.
+      # The committed 5.1 fixture (aften's encode, liba52's decode) is checked
+      # on every run. The full sweep needs the generated vectors and Dolby's
+      # streams, so it runs in the oracle job below and skips here.
       # The encoder's tests (tests/encoder.rs) check every frame they write
       # against A/52 and decode it with this crate's decoder: every AC-3
       # layout x LFE x sample rate x bit rate, E-AC-3 32-6144 kbit/s, round
@@ -42,6 +41,37 @@ jobs:
         run: cargo test --release --test encoder -- --nocapture --test-threads 1
       - name: Tests with the tracing feature (debug)
         run: cargo test --features tracing
+
+  oracle:
+    name: decoder against liba52 and Dolby's encodes (black box)
+    # The decoder against independent implementations, run as black boxes
+    # (no FFmpeg): aften encodes deterministic signals across layouts, rates,
+    # dynrng profiles and forced block switching, liba52 (GStreamer's a52dec)
+    # decodes them; Dolby's own AC-3 and E-AC-3 encodes come from its Online
+    # Delivery Kit (tools/fetch_dolby_kit.sh, checksum-pinned). Required
+    # here: a missing vector directory fails the tests instead of skipping.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends aften
+          gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly
+      - uses: actions/cache@v4
+        with:
+          path: vectors/dolby/audio.zip
+          key: dolby-ddp-kit-v1.4.1-audio
+      - run: cargo build --release --example ac3_strip_dither
+      - name: Vectors
+        run: |
+          OUT=vectors STRIP=target/release/examples/ac3_strip_dither bash tools/make_vectors.sh
+          OUT=vectors STRIP=target/release/examples/ac3_strip_dither bash tools/fetch_dolby_kit.sh
+      - name: Cross-check
+        env:
+          RIVET_AC3_VECTORS: vectors
+          RIVET_AC3_REQUIRE_VECTORS: "1"
+        run: cargo test --release --test ac3_decode_vectors -- --nocapture --test-threads 1
 
   msrv:
     name: MSRV (1.99)

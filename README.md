@@ -5,9 +5,10 @@
 An **AC-3 / E-AC-3** (Dolby Digital / Dolby Digital Plus) **decoder and
 encoder** in Rust: no C, no system libraries, no build script, nothing to
 install on a build host. Written from ATSC A/52:2018, not translated from
-any other implementation. The decoder agrees with libavcodec to float
-rounding wherever the bit stream is deterministic, and to the expected
-dither difference where it is not (the figures are
+any other implementation. The decoder agrees with liba52, an independent
+decoder, to float rounding wherever the bit stream is deterministic, and to
+the expected dither difference where it is not — on aften's encodes and on
+Dolby's own — and decodes Dolby's E-AC-3 test streams (the figures are
 [below](#how-the-decoder-is-checked)). The encoder writes AC-3 at every
 Table 5.18 bit rate and E-AC-3 from 32 to 6144 kbit/s, every channel layout
 with or without LFE and 7.1 through a dependent substream; every frame it
@@ -36,12 +37,11 @@ ac3 = { package = "rivet-ac3", git = "https://github.com/rivet-transcoder/rivet-
 |---|---|---|
 | **AC-3** (bsid ≤ 8) | every `acmod`, 1–6 channels including LFE; block switching, dither, coupling with phase flags, rematrixing, delta bit allocation, dynamic range compression (`dynrng`, applied by default, scalable) | bsid 9 / 10 (Annex D reduced-rate AC-3): `Error::Unsupported` |
 | **E-AC-3** (bsid 16) | independent substream 0: every `numblkscod` (1, 2, 3 and 6 blocks), reduced sample rates, frame exponent strategies, the three SNR-offset strategies, standard coupling, spectral extension with attenuation, the adaptive hybrid transform (vector and gain-adaptive quantisation) | enhanced coupling (`ecplinu = 1`): `Error::Unsupported`. Dependent substreams and independent substreams other than 0 are skipped (Annex E §3.8.1), so 7.1 decodes as its 5.1 core (`FrameDecoder::set_decode_all_substreams` decodes one as a programme of its own, a diagnostic the encoder's tests use) |
-| **Not applied** | — | `dialnorm` and heavy compression (`compr`) are parsed and not applied, as libavcodec does by default; transient pre-noise processing is parsed and ignored (an optional post-process) |
+| **Not applied** | — | `dialnorm` and heavy compression (`compr`) are parsed and not applied; transient pre-noise processing is parsed and ignored (an optional post-process) |
 
 No downmix is performed. Output is interleaved `f32` at ±1.0 full scale,
 256 samples per channel per audio block (1536 per AC-3 syncframe), in
-ffmpeg's native order for the layout — the fronts, the LFE, then the
-surrounds — and each frame names its speakers ([`Speaker`](src/lib.rs)):
+WAVE order for the layout — the fronts, the LFE, then the surrounds — and each frame names its speakers ([`Speaker`](src/lib.rs)):
 
 | `acmod` | output (LFE, when present, after the fronts) |
 |---|---|
@@ -79,8 +79,7 @@ let mut pcm = Vec::new();
 let header = fd.decode(&bytes[..hdr.frame_len], &mut pcm)?; // None: a skipped substream
 ```
 
-`examples/ac3_decode.rs` is the counterpart of `ffmpeg -i x.ac3 -f f32le`
-(`AC3_DECODE_FRAMES=1` for the tools each syncframe used; `RUST_LOG=trace`
+`examples/ac3_decode.rs` decodes a stream to raw interleaved f32le (`AC3_DECODE_FRAMES=1` for the tools each syncframe used; `RUST_LOG=trace`
 with `--features tracing` for the syntax trace), and
 `examples/ac3_strip_dither.rs` clears every `dithflag` and re-solves the
 CRCs, to make a stream deterministic for cross-checking.
@@ -126,36 +125,58 @@ for frame in enc.flush()? { out.write_all(&frame)?; }
   E4.1–E4.7 — names its PDF page, and a test per table pins its length, its
   checksum and spot values re-read from the rendered page. The KBD window is
   also derived analytically and matched to Table 7.33 to five decimals.
-- **Against libavcodec, as a black box** (`tests/ac3_decode_vectors.rs`).
-  A/52 defines the bit allocation in exact integers but leaves the transform
-  and dequantisation to floating point, and lets dither and the
-  spectral-extension noise be "any reasonably random sequence", so two
-  conformant decoders agree to float rounding where the stream is
+- **Against independent implementations, as black boxes**
+  (`tests/ac3_decode_vectors.rs`; no FFmpeg anywhere). A/52 defines the bit
+  allocation in exact integers but leaves the transform and dequantisation
+  to floating point, and lets dither be "any reasonably random sequence", so
+  two conformant decoders agree to float rounding where the stream is
   deterministic and differ by their independent noise where it is not. The
   gate is relative to a *measured* noise floor (a second decode with the
-  noise fill off; libavcodec's noise is independent, so the expected
+  noise fill off; the reference's noise is independent, so the expected
   difference is √2 × ours): per channel, RMS ≤ max(1 LSB16, 1.5 × √2 ×
-  floor) and peak ≤ max(8 LSB16, 2.5 × floor peak). The committed 5.1 fixture
-  (250 ms at 448 kbit/s, ffmpeg's encoder) runs on every `cargo test`; the
-  full sweep runs when `RIVET_AC3_VECTORS` points at the vectors made by
-  `tests/data/ac3_make_vectors.sh`, and skips otherwise.
+  floor) and peak ≤ max(8 LSB16, 2.5 × floor peak). The reference decoder is
+  liba52 (through GStreamer's `a52dec` element); the streams come from
+  aften, an independent AC-3 encoder, and from Dolby. The committed 5.1
+  fixture (`tests/data/aften_51_448k.*`, 250 ms at 448 kbit/s with a
+  `dynrng` profile, `tools/make_fixture.sh`) runs on every `cargo test`; the
+  full sweep runs in CI's oracle job over the vectors `tools/make_vectors.sh`
+  makes and the streams `tools/fetch_dolby_kit.sh` fetches from Dolby's
+  Online Delivery Kit (`RIVET_AC3_VECTORS`; `RIVET_AC3_REQUIRE_VECTORS`
+  fails rather than skips when they are missing).
+- **E-AC-3 against Dolby's AC-3 encode of the same programme.** No decoder
+  but FFmpeg's could serve as an E-AC-3 reference, and none is used. Dolby's
+  kit carries its channel-identification programme both as E-AC-3 5.1 at
+  256 kbit/s (spectral extension, AHT with VQ / GAQ / large mantissas,
+  coupling, `dynrng`) and as AC-3 5.1 at 640 kbit/s; this decoder's E-AC-3
+  output is held to liba52's decode of the AC-3 one. The two encodes are
+  lossy in different ways, so the bar is not sample-level but what only a
+  correct decode of both reaches: lag 0, every full-bandwidth channel's level
+  within 0.5 dB, waveform SNR ≥ 15 dB and band energies to 16 kHz within
+  3 dB, the LFE below 250 Hz within 1.5 dB. Every other stream in the kit
+  (stereo and 5.1, Atmos-carrying JOC, A/V sync, silence; 384–640 kbit/s)
+  must decode end to end with good CRCs.
 
-Measured 2026-09-13, in 16-bit LSBs (1 LSB16 = 1/32768):
+Measured 2026-10-03 in CI (liba52 0.7.4, aften 0.0.8 git 2010-01-05), in
+16-bit LSBs (1 LSB16 = 1/32768):
 
 | streams | what they exercise | result |
 |---|---|---|
-| 30 made by ffmpeg's encoders, each with and without `dynrng` | mono to 5.1; 32, 44.1 and 48 kHz; AC-3 64–448 kbit/s, E-AC-3 48–256 kbit/s; tones, pink / white / brown noise, clicks; copies with `blksw` forced (`ac3_make_blksw_vector.py`) | dither-stripped copies within **0.03 RMS / 0.32 peak** (float rounding); dithered originals at the noise floor (RMS / expected 0.9–1.1) |
-| Dolby-encoded, from ffmpeg's FATE suite | `monsters_inc_5.1_448` (AC-3, coupling, `dynrng` every block), `matrix2_commentary1_stereo_192` (E-AC-3, coupling), `serenity_english_5.1_1536` (E-AC-3, one block per frame), `millers_crossing_4.0`, `monsters_inc_2.0_192` | `monsters_inc_5.1_448` RMS / expected 1.04–1.09 (dither-stripped 0.03 RMS); `matrix2_commentary1` 0.99–1.01; `serenity_english` ≤ 0.11 RMS; `millers_crossing_4.0` and `monsters_inc_2.0_192` identical (dither-stripped 0.01–0.07 RMS) but for one block each, masked (below) |
-| Dolby-encoded `csi_miami_5.1_256_spx`, `csi_miami_stereo_128_spx` | E-AC-3 spectral extension and AHT (VQ, GAQ, large mantissas), `dynrng` | full-bandwidth channels at 1.2–1.8 × the dither-only expectation: the SPX noise blend's random sequence, which Annex E §3.6.4.2 does not fix; the gate widens for SPX streams and says so |
+| 13 aften encodes, each with and without `dynrng` applied, each also dither-stripped (`ac3_strip_dither`) | mono, 2/0, 3/0, 2/2, 3/2 + LFE; 32, 44.1 and 48 kHz; 64–448 kbit/s; rematrixing; aften's `dynrng` profiles; tones, pink / white / brown noise, clicks; copies with `blksw` forced in every channel (`ac3_make_blksw_vector.py`) | dither-stripped copies within **0.001 RMS / 0.01 peak** (float rounding); dithered originals at the noise floor (RMS / expected 0.84–1.28) |
+| Dolby-encoded AC-3 `ChID_voices_6ch_640kbps_dd` (72 s) | `dynrng` in half the blocks, block switching (16 blocks where only some channels switch) | dither-stripped within **0.01 peak**, mixed-transform blocks included, nothing masked |
+| Dolby-encoded E-AC-3 `ChID_voices_6ch_256kbps_ddp` against the AC-3 above | spectral extension, AHT, GAQ, coupling, `dynrng` | SNR 16.8–22.0 dB, levels within 0.02 dB, bands within 2.2 dB; LFE −0.4 dB |
+| the kit's other ten E-AC-3 streams | coupling, rematrixing, block switching, JOC-carrying 5.1 at 448 / 640 kbit/s | decode clean, every CRC good |
 
-Where the two disagree beyond that, the disagreement is localised and the
-spec is followed: in two Dolby streams libavcodec overlap-adds a
-block-switched channel's previous tail onto a neighbouring channel in one
-block, contrary to §7.9.4 step 6. `FrameDecoder::mixed_transform_blocks()`
-lists such blocks and the harness masks and counts them in every report
-line. Mutation check: changing one `hth` entry fails its table test and the
-fixture cross-check in frame 0 — a wrong bit-allocation table
-desynchronises the mantissa parse rather than degrading the audio.
+What is not covered by an independent decoder: E-AC-3 sample by sample.
+The E-AC-3-only tools are checked against the spec's tables and syntax, by
+the encoder's round trips, and against Dolby's AC-3 encode above, which
+catches a wrong channel, level, band or transform but not an error below
+about −20 dB of the signal. A block where only some channels switch to the
+short transform is compared like any other (`FrameDecoder::
+mixed_transform_blocks()` lists them, and `RIVET_AC3_MASK_MIXED` masks them
+for a reference that departs from §7.9.4 step 6 there). Mutation check:
+changing one `hth` entry fails its table test and the fixture cross-check
+in frame 0 — a wrong bit-allocation table desynchronises the mantissa parse
+rather than degrading the audio.
 
 ## How the encoder is checked
 
@@ -216,9 +237,11 @@ pair keeps it inside the onset's block.
 ## Provenance and licensing
 
 Written from the text of ATSC A/52:2018 (with Annex E for E-AC-3); **no
-AC-3 implementation's source was read or copied** — libavcodec's tables
-included — and ffmpeg was used only as a command-line tool, to make the
-decoder's test streams and decode them for comparison. The encoder follows
+AC-3 implementation's source was read or copied** — libavcodec's, liba52's
+and aften's tables included. aften and liba52 are run only as command-line
+tools, to make the decoder's test streams and decode them for comparison,
+and the Dolby streams are Dolby's published test data; FFmpeg is not used at
+all. The encoder follows
 A/52's §8 (the informative encoder description) and the normative syntax
 and decoding processes it must satisfy; it reuses the decoder's tables and
 bit allocation, and its tests run no other implementation at all. The tables were transcribed from the
