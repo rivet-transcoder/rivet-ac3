@@ -4,7 +4,7 @@
 //! times faster than real time each runs (best of several passes) with a
 //! hash of the frames and of the decoded PCM.
 //!
-//! `cargo run --release --example bench -- <pcm.f32> [passes] [filter]`
+//! `cargo run --release --example ac3_bench -- <pcm.f32> [passes] [filter]`
 
 use std::time::Instant;
 
