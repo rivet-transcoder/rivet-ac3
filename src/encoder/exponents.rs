@@ -80,10 +80,34 @@ pub(super) fn set_bits(set: Set, start: usize, end: usize, expstr: u8) -> usize 
 /// values are lowered until every difference is within ±2. Exponents only
 /// ever go down, so no mantissa overflows.
 pub(super) fn encode_set(want: &[u8; 256], set: Set, start: usize, end: usize, expstr: u8) -> Coded {
+    let mut seq = [0i32; MAX_SEQ];
+    let n = sequence(want, set, start, end, expstr, &mut seq);
+    let mut groups = Vec::with_capacity(n / 3);
+    for grp in 0..n / 3 {
+        let d = |j: usize| seq[1 + 3 * grp + j] - seq[3 * grp + j] + 2;
+        debug_assert!((0..3).all(|j| (0..=4).contains(&d(j))));
+        groups.push((25 * d(0) + 5 * d(1) + d(2)) as u8);
+    }
+    let mut exps = [0u8; 256];
+    rebuild(&seq, set, start, end, expstr, &mut exps);
+    let abs = match set {
+        Set::Absolute => seq[0] as u8,
+        Set::Coupling => (seq[0] >> 1) as u8,
+    };
+    Coded { abs, groups, exps }
+}
+
+/// Longest exponent sequence: the reference and three per group of up to
+/// 253 / 3 groups of one bin.
+const MAX_SEQ: usize = 1 + 3 * 85;
+
+/// The coded exponent sequence of [`encode_set`] (`seq[0]` the absolute or
+/// reference value, then one per differential) into `seq`; returns the
+/// number of differentials.
+fn sequence(want: &[u8; 256], set: Set, start: usize, end: usize, expstr: u8, seq: &mut [i32; MAX_SEQ]) -> usize {
     let g = grpsize(expstr);
     let ngrps = ngroups(set, start, end, expstr);
-    // seq[0] is the absolute/reference value, seq[1..] one per differential.
-    let mut seq = vec![0i32; 1 + 3 * ngrps];
+    let seq = &mut seq[..1 + 3 * ngrps];
     let first_bin = match set {
         Set::Absolute => {
             seq[0] = i32::from(want[start].min(15));
@@ -118,24 +142,25 @@ pub(super) fn encode_set(want: &[u8; 256], set: Set, start: usize, end: usize, e
         // rounding down to even keeps it in seq[1] − 1..=seq[1] + 2.
         seq[0] &= !1;
     }
-    let mut groups = Vec::with_capacity(ngrps);
-    for grp in 0..ngrps {
-        let d: Vec<i32> = (0..3).map(|j| seq[1 + 3 * grp + j] - seq[3 * grp + j] + 2).collect();
-        debug_assert!(d.iter().all(|v| (0..=4).contains(v)));
-        groups.push((25 * d[0] + 5 * d[1] + d[2]) as u8);
-    }
-    let mut exps = [0u8; 256];
-    if set == Set::Absolute {
-        exps[start] = seq[0] as u8;
-    }
-    for bin in first_bin..end {
-        exps[bin] = seq[1 + (bin - first_bin) / g] as u8;
-    }
-    let abs = match set {
-        Set::Absolute => seq[0] as u8,
-        Set::Coupling => (seq[0] >> 1) as u8,
+    3 * ngrps
+}
+
+/// The exponent of every bin `start..end` as the decoder rebuilds it from
+/// the sequence, into `exps`.
+fn rebuild(seq: &[i32; MAX_SEQ], set: Set, start: usize, end: usize, expstr: u8, exps: &mut [u8; 256]) {
+    let g = grpsize(expstr);
+    let first_bin = match set {
+        Set::Absolute => {
+            exps[start] = seq[0] as u8;
+            start + 1
+        }
+        Set::Coupling => start,
     };
-    Coded { abs, groups, exps }
+    if first_bin < end {
+        for (i, chunk) in exps[first_bin..end].chunks_mut(g).enumerate() {
+            chunk.fill(seq[1 + i] as u8);
+        }
+    }
 }
 
 /// The per-channel input to the strategy choice: one entry per block.
@@ -160,14 +185,22 @@ pub(super) struct Track<'a> {
 
 /// Cost of covering blocks `b..b+k` with one set of strategy `s`.
 pub(super) fn run_cost(t: &Track, b: usize, k: usize, s: u8) -> f32 {
+    run_cost_for(t, b, k, s, &min_exps(t, b, k))
+}
+
+/// [`run_cost`] given the run's wanted exponents ([`min_exps`]).
+fn run_cost_for(t: &Track, b: usize, k: usize, s: u8, want: &[u8; 256]) -> f32 {
     let (start, end) = (t.start[b], t.end[b]);
-    let want = min_exps(t, b, k);
-    let coded = encode_set(&want, t.set, start, end, s);
+    // The decoder's exponents of the set, without packing the groups.
+    let mut seq = [0i32; MAX_SEQ];
+    sequence(want, t.set, start, end, s, &mut seq);
+    let mut exps = [0u8; 256];
+    rebuild(&seq, t.set, start, end, s, &mut exps);
     let mut penalty = 0u32;
     for blk in b..b + k {
         let raw = t.raw[blk].expect("present");
         for bin in start..end {
-            penalty += u32::from((raw[bin] - coded.exps[bin]).min(6));
+            penalty += u32::from((raw[bin] - exps[bin]).min(6));
         }
     }
     (set_bits(t.set, start, end, s) + t.overhead) as f32 + t.lambda * penalty as f32
@@ -205,9 +238,15 @@ pub(super) fn choose(t: &Track) -> Vec<u8> {
             continue;
         }
         let mut k = 1;
+        // The run's wanted exponents, extended one block at a time.
+        let mut want = [24u8; 256];
         loop {
+            let raw = t.raw[b + k - 1].expect("present");
+            for bin in t.start[b]..t.end[b] {
+                want[bin] = want[bin].min(raw[bin]);
+            }
             for &s in t.choices {
-                let c = best[b] + run_cost(t, b, k, s);
+                let c = best[b] + run_cost_for(t, b, k, s, &want);
                 if c < best[b + k] {
                     best[b + k] = c;
                     from[b + k] = (b, s);
@@ -235,6 +274,16 @@ pub(super) fn choose(t: &Track) -> Vec<u8> {
 /// if no row is valid (a row must not reuse where a new set is required).
 pub(super) fn choose_frame_row(t: &Track) -> Option<(usize, f32)> {
     let mut best: Option<(usize, f32)> = None;
+    // The rows share most of their runs: each (start, length, strategy)
+    // costed once.
+    let mut memo = [[[f32::NAN; 4]; 7]; 6];
+    let mut run_cost = |b: usize, k: usize, s: u8| {
+        let m = &mut memo[b][k][usize::from(s)];
+        if m.is_nan() {
+            *m = run_cost(t, b, k, s);
+        }
+        *m
+    };
     'rows: for (row, strat) in FRMEXPSTR.iter().enumerate() {
         let mut cost = 0.0;
         let mut b = 0;
@@ -255,7 +304,7 @@ pub(super) fn choose_frame_row(t: &Track) -> Option<(usize, f32)> {
                 }
                 k += 1;
             }
-            cost += run_cost(t, b, k, s);
+            cost += run_cost(b, k, s);
             b += k;
         }
         if best.is_none_or(|(_, c)| cost < c) {

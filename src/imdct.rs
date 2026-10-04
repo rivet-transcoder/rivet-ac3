@@ -62,6 +62,25 @@ struct C {
     im: f64,
 }
 
+/// The butterflies' `(sin, cos)` of `2πk/size` for every stage `size` up
+/// to 128 (the 512-sample transform's FFT), stage `size` at offset
+/// `size / 2`: the very values `(step * k).sin_cos()` gives, computed once.
+fn ifft_twiddles() -> &'static [(f64, f64); 128] {
+    static T: OnceLock<[(f64, f64); 128]> = OnceLock::new();
+    T.get_or_init(|| {
+        let mut t = [(0.0, 0.0); 128];
+        let mut size = 2;
+        while size <= 128 {
+            let step = 2.0 * PI / size as f64;
+            for k in 0..size / 2 {
+                t[size / 2 + k] = (step * k as f64).sin_cos();
+            }
+            size *= 2;
+        }
+        t
+    })
+}
+
 /// In-place iterative radix-2 inverse DFT (unnormalised, +j convention):
 /// `z[n] = Σ_k Z[k] exp(+j 2π k n / len)`.
 fn ifft(buf: &mut [C]) {
@@ -75,12 +94,14 @@ fn ifft(buf: &mut [C]) {
             buf.swap(i, j);
         }
     }
+    let table = ifft_twiddles();
     let mut size = 2;
     while size <= len {
-        let step = 2.0 * PI / size as f64;
+        // This stage's (sin, cos) of 2πk/size, k < size/2, at offset size/2.
+        let tw = &table[size / 2..size];
         for start in (0..len).step_by(size) {
             for k in 0..size / 2 {
-                let (s, c) = (step * k as f64).sin_cos();
+                let (s, c) = tw[k];
                 let a = buf[start + k];
                 let b = buf[start + k + size / 2];
                 let t = C { re: b.re * c - b.im * s, im: b.re * s + b.im * c };
