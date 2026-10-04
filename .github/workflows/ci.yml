@@ -15,6 +15,12 @@ env:
 # x86-64 Linux only. No Windows, macOS or arm64 jobs: the code stays
 # portable, but nothing here tests it there.
 
+# id-token: a push to develop or main shows the compile cache's broker its
+# OIDC token to be allowed to write the cache (ci-cache-setup).
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   test:
     name: tests (${{ matrix.name }})
@@ -27,7 +33,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - name: Compile cache
+        # sccache on the cluster's Garage (safewords/helm-charts ci-cache):
+        # read-only for pull requests, written by pushes to develop / main.
+        run: if command -v ci-cache-setup >/dev/null; then ci-cache-setup; else echo "no compile cache on this runner"; fi
       - name: Build
         run: cargo build --release
       # The committed 5.1 fixture (aften's encode, liba52's decode) is checked
@@ -57,7 +66,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - name: Compile cache
+        # sccache on the cluster's Garage (safewords/helm-charts ci-cache):
+        # read-only for pull requests, written by pushes to develop / main.
+        run: if command -v ci-cache-setup >/dev/null; then ci-cache-setup; else echo "no compile cache on this runner"; fi
       - run: >-
           sudo apt-get update && sudo apt-get install -y --no-install-recommends aften
           gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-ugly
@@ -82,7 +94,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99
-      - uses: Swatinem/rust-cache@v2
+      - name: Compile cache
+        # sccache on the cluster's Garage (safewords/helm-charts ci-cache):
+        # read-only for pull requests, written by pushes to develop / main.
+        run: if command -v ci-cache-setup >/dev/null; then ci-cache-setup; else echo "no compile cache on this runner"; fi
       - run: cargo build --release
       - run: cargo test --release --test encoder
 
@@ -94,9 +109,27 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - name: Compile cache
+        # sccache on the cluster's Garage (safewords/helm-charts ci-cache):
+        # read-only for pull requests, written by pushes to develop / main.
+        run: if command -v ci-cache-setup >/dev/null; then ci-cache-setup; else echo "no compile cache on this runner"; fi
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo clippy --all-targets --features tracing -- -D warnings
       - run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
+
+  # rivet's compile cache, warmed with this commit before rivet's submodule is
+  # bumped to it: the commit built inside rivet exactly as rivet's CI builds
+  # it (safewords/rivet-transcoder .github/workflows/codec-cache-warmup.yml).
+  # Never fails this workflow.
+  rivet-cache:
+    name: warm rivet's compile cache
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    permissions:
+      contents: read
+      id-token: write
+    uses: safewords/rivet-transcoder/.github/workflows/codec-cache-warmup.yml@develop
+    with:
+      crates: rivet-ac3
+      submodule: crates/ac3
