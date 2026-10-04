@@ -31,7 +31,12 @@ fn main() {
     let raw = std::fs::read(args.get(1).expect("pcm file")).unwrap();
     let passes: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(5);
     let only = args.get(3).cloned().unwrap_or_default();
-    let stereo: Vec<f32> = raw.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+    let stereo: Vec<f32> = raw
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
+        .collect();
     let secs = stereo.len() as f64 / 2.0 / 48_000.0;
     // FL FR FC LFE SL SR from L R: centre and LFE from the sum, surrounds
     // from the difference.
@@ -40,14 +45,42 @@ fn main() {
         .0
         .iter()
         .flat_map(|&[l, r]| {
-            [l, r, 0.5 * (l + r), 0.25 * (l + r), 0.5 * (l - r), 0.5 * (r - l)]
+            [
+                l,
+                r,
+                0.5 * (l + r),
+                0.25 * (l + r),
+                0.5 * (l - r),
+                0.5 * (r - l),
+            ]
         })
         .collect();
     type Case<'a> = (&'a str, Format, Layout, bool, u32, &'a [f32]);
     let cases: [Case; 3] = [
-        ("ac3 2.0 192k", Format::Ac3, Layout::Stereo, false, 192, &stereo),
-        ("ac3 5.1 448k", Format::Ac3, Layout::ThreeTwo, true, 448, &six),
-        ("eac3 2.0 128k", Format::Eac3, Layout::Stereo, false, 128, &stereo),
+        (
+            "ac3 2.0 192k",
+            Format::Ac3,
+            Layout::Stereo,
+            false,
+            192,
+            &stereo,
+        ),
+        (
+            "ac3 5.1 448k",
+            Format::Ac3,
+            Layout::ThreeTwo,
+            true,
+            448,
+            &six,
+        ),
+        (
+            "eac3 2.0 128k",
+            Format::Eac3,
+            Layout::Stereo,
+            false,
+            128,
+            &stereo,
+        ),
     ];
     for (name, format, layout, lfe, kbps, pcm) in cases {
         if !name.contains(only.as_str()) {
@@ -65,7 +98,10 @@ fn main() {
         });
         let mut h = 0xcbf2_9ce4_8422_2325u64;
         frames.iter().for_each(|f| fnv(&mut h, f.iter().copied()));
-        println!("encode  {name:<14} {:7.1} x realtime (stream hash {h:016x})", secs / t);
+        println!(
+            "encode  {name:<14} {:7.1} x realtime (stream hash {h:016x})",
+            secs / t
+        );
         let mut out = Vec::new();
         let t = best(passes, || {
             let mut dec = FrameDecoder::new(1.0);
@@ -75,7 +111,13 @@ fn main() {
             }
         });
         let mut out_h = 0xcbf2_9ce4_8422_2325;
-        fnv(&mut out_h, out.iter().flat_map(|v| v.to_bits().to_le_bytes()));
-        println!("decode  {name:<14} {:7.1} x realtime (output hash {out_h:016x})", secs / t);
+        fnv(
+            &mut out_h,
+            out.iter().flat_map(|v| v.to_bits().to_le_bytes()),
+        );
+        println!(
+            "decode  {name:<14} {:7.1} x realtime (output hash {out_h:016x})",
+            secs / t
+        );
     }
 }

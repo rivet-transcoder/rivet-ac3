@@ -402,7 +402,12 @@ impl Decoder {
         self.buf.drain(..pos);
         // The bytes given end here: a programme frame whose dependent
         // substreams have come, or of a stream that has none, is complete.
-        if self.buf.is_empty() && self.pending.as_ref().is_some_and(|(_, merged)| *merged || !self.has_dependents) {
+        if self.buf.is_empty()
+            && self
+                .pending
+                .as_ref()
+                .is_some_and(|(_, merged)| *merged || !self.has_dependents)
+        {
             frames.extend(self.pending.take().map(|(f, _)| f));
         }
         Ok(frames)
@@ -411,6 +416,8 @@ impl Decoder {
 
 impl std::fmt::Debug for Decoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Decoder").field("buffered", &self.buf.len()).finish()
+        f.debug_struct("Decoder")
+            .field("buffered", &self.buf.len())
+            .finish()
     }
 }

@@ -31,7 +31,9 @@ impl Biquad {
     }
 
     fn run(&mut self, x: f32) -> f32 {
-        let y = self.b[0] * x + self.b[1] * self.x[0] + self.b[2] * self.x[1] - self.a[0] * self.y[0] - self.a[1] * self.y[1];
+        let y = self.b[0] * x + self.b[1] * self.x[0] + self.b[2] * self.x[1]
+            - self.a[0] * self.y[0]
+            - self.a[1] * self.y[1];
         self.x = [x, self.x[0]];
         self.y = [y, self.y[0]];
         y
@@ -54,7 +56,13 @@ impl Detector {
     pub fn new(sample_rate: u32) -> Self {
         let fs = sample_rate as f32;
         // Fourth-order Butterworth: section Qs 1/(2cos(π/8)), 1/(2cos(3π/8)).
-        Self { hp: [Biquad::highpass(fs, 8000.0, 0.541_196_1), Biquad::highpass(fs, 8000.0, 1.306_563)], last: [f32::MAX; 3] }
+        Self {
+            hp: [
+                Biquad::highpass(fs, 8000.0, 0.541_196_1),
+                Biquad::highpass(fs, 8000.0, 1.306_563),
+            ],
+            last: [f32::MAX; 3],
+        }
     }
 
     /// Feed a block's 256 new samples; true if they hold a transient.
@@ -72,7 +80,9 @@ impl Detector {
             let len = 256 >> j;
             let mut prev = self.last[j];
             for k in 0..segs {
-                let p = x[k * len..(k + 1) * len].iter().fold(0.0f32, |m, v| m.max(v.abs()));
+                let p = x[k * len..(k + 1) * len]
+                    .iter()
+                    .fold(0.0f32, |m, v| m.max(v.abs()));
                 if j == 0 {
                     overall = p;
                 }
@@ -94,7 +104,9 @@ mod tests {
     #[test]
     fn a_click_after_quiet_is_a_transient_a_steady_tone_is_not() {
         let mut d = Detector::new(48_000);
-        let tone: Vec<f32> = (0..256 * 20).map(|n| 0.5 * (n as f32 * 0.37).sin()).collect();
+        let tone: Vec<f32> = (0..256 * 20)
+            .map(|n| 0.5 * (n as f32 * 0.37).sin())
+            .collect();
         let mut flagged = 0;
         for b in 1..20 {
             flagged += usize::from(d.detect(&tone[b * 256..(b + 1) * 256]));

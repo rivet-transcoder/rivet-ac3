@@ -21,7 +21,11 @@ fn crc16(data: &[u8]) -> u16 {
     for &b in data {
         crc ^= u16::from(b) << 8;
         for _ in 0..8 {
-            crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x8005 } else { crc << 1 };
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x8005
+            } else {
+                crc << 1
+            };
         }
     }
     crc
@@ -42,7 +46,9 @@ fn solve_prefix_crc(body: &[u8]) -> u16 {
         .collect();
     let mut w = 0u16;
     for bit in (0..16).rev() {
-        let Some(p) = rows.iter().position(|r| r.0 & (1 << bit) != 0) else { continue };
+        let Some(p) = rows.iter().position(|r| r.0 & (1 << bit) != 0) else {
+            continue;
+        };
         let piv = rows.remove(p);
         for r in &mut rows {
             if r.0 & (1 << bit) != 0 {
@@ -73,11 +79,14 @@ fn main() {
     let mut out = Vec::with_capacity(es.len());
     let mut dec = FrameDecoder::new(0.0);
     let mut scratch = Vec::new();
-    let (mut frames, mut stripped, mut kept, mut copied, mut skipped_bytes) = (0usize, 0usize, 0usize, 0usize, 0usize);
+    let (mut frames, mut stripped, mut kept, mut copied, mut skipped_bytes) =
+        (0usize, 0usize, 0usize, 0usize, 0usize);
     let mut pos = 0usize;
     while pos + 8 <= es.len() {
         let hdr = match parse_header(&es[pos..]) {
-            Ok(h) if pos + h.frame_len <= es.len() && frame_crc_ok(&es[pos..pos + h.frame_len]) => h,
+            Ok(h) if pos + h.frame_len <= es.len() && frame_crc_ok(&es[pos..pos + h.frame_len]) => {
+                h
+            }
             Ok(h) if pos + h.frame_len > es.len() => break,
             _ => {
                 skipped_bytes += 1;

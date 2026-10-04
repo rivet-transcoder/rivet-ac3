@@ -133,7 +133,12 @@ fn wave_rank(s: Speaker) -> u8 {
 /// whole re-ordered to WAVE order. `Err` (and `base` untouched) for a
 /// substream that does not fit: another length, or a location this decoder
 /// has no output for.
-pub(crate) fn merge(base: &mut Frame, pcm: &[f32], hdr: &Header, chanmap: Option<u16>) -> Result<(), String> {
+pub(crate) fn merge(
+    base: &mut Frame,
+    pcm: &[f32],
+    hdr: &Header,
+    chanmap: Option<u16>,
+) -> Result<(), String> {
     let n = base.samples.len() / base.channels.max(1);
     let dep_ch = hdr.channels();
     if hdr.samples() != n || pcm.len() != n * dep_ch || hdr.sample_rate != base.sample_rate {
@@ -150,18 +155,27 @@ pub(crate) fn merge(base: &mut Frame, pcm: &[f32], hdr: &Header, chanmap: Option
             // §E.1.3.1.8: the locations named are the coded channels, the
             // LFE among them.
             if hdr.lfeon != (m & CHANMAP_LFE != 0) {
-                return Err(format!("lfeon {} against the chanmap's LFE bit", u8::from(hdr.lfeon)));
+                return Err(format!(
+                    "lfeon {} against the chanmap's LFE bit",
+                    u8::from(hdr.lfeon)
+                ));
             }
             locations
         }
         None => coded_speakers(hdr.acmod).to_vec(),
     };
     if fbw.len() != hdr.nfchans {
-        return Err(format!("{} full-bandwidth channels for {} chanmap locations", hdr.nfchans, fbw.len()));
+        return Err(format!(
+            "{} full-bandwidth channels for {} chanmap locations",
+            hdr.nfchans,
+            fbw.len()
+        ));
     }
     // The location of each of the dependent substream's output slots.
-    let dep_speakers: Vec<Speaker> =
-        coded_output_channels(hdr.acmod, hdr.lfeon).into_iter().map(|c| c.map_or(Speaker::LFE, |i| fbw[i])).collect();
+    let dep_speakers: Vec<Speaker> = coded_output_channels(hdr.acmod, hdr.lfeon)
+        .into_iter()
+        .map(|c| c.map_or(Speaker::LFE, |i| fbw[i]))
+        .collect();
     let mut layout = base.layout.clone();
     for s in &dep_speakers {
         if !layout.contains(s) {
@@ -172,7 +186,14 @@ pub(crate) fn merge(base: &mut Frame, pcm: &[f32], hdr: &Header, chanmap: Option
     let source = |s: Speaker| -> (&[f32], usize, usize) {
         match dep_speakers.iter().position(|&d| d == s) {
             Some(slot) => (pcm, dep_ch, slot),
-            None => (&base.samples, base.channels, base.layout.iter().position(|&b| b == s).expect("in one of the two")),
+            None => (
+                &base.samples,
+                base.channels,
+                base.layout
+                    .iter()
+                    .position(|&b| b == s)
+                    .expect("in one of the two"),
+            ),
         }
     };
     let ch = layout.len();
@@ -195,12 +216,21 @@ mod tests {
 
     #[test]
     fn chanmap_bits_are_counted_from_the_most_significant() {
-        assert_eq!(chanmap_locations(0x0200), Ok(vec![Speaker::BL, Speaker::BR]));
-        assert_eq!(chanmap_locations(0xA000), Ok(vec![Speaker::FL, Speaker::FR]));
+        assert_eq!(
+            chanmap_locations(0x0200),
+            Ok(vec![Speaker::BL, Speaker::BR])
+        );
+        assert_eq!(
+            chanmap_locations(0xA000),
+            Ok(vec![Speaker::FL, Speaker::FR])
+        );
         assert_eq!(chanmap_locations(0x0100), Ok(vec![Speaker::BC]));
         assert!(chanmap_locations(0x0400).unwrap_err().contains("Lc/Rc"));
         // The LFE location is not a full-bandwidth one.
-        assert_eq!(chanmap_locations(0x0201), Ok(vec![Speaker::BL, Speaker::BR]));
+        assert_eq!(
+            chanmap_locations(0x0201),
+            Ok(vec![Speaker::BL, Speaker::BR])
+        );
         // The 7.1 encoder's map: Ls, Rs, then the Lrs/Rrs pair.
         assert_eq!(
             chanmap_locations(crate::encoder::SEVEN_ONE_CHANMAP),

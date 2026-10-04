@@ -201,7 +201,12 @@ impl SubEncoder {
         }
     }
 
-    fn try_frame(&mut self, pcm: &[Vec<f32>], words: usize, allow_switch: bool) -> Result<Vec<u8>, Error> {
+    fn try_frame(
+        &mut self,
+        pcm: &[Vec<f32>],
+        words: usize,
+        allow_switch: bool,
+    ) -> Result<Vec<u8>, Error> {
         let p = self.p.clone();
         let nb = p.numblks;
         let nf = p.nfchans;
@@ -249,7 +254,11 @@ impl SubEncoder {
         for blk in 0..nb {
             let cpl = p.cpl.filter(|_| w.plan[blk].cplinu);
             for ch in 0..nf {
-                let e = if w.plan[blk].incpl[ch] { cpl.expect("cpl").strt() } else { bw_end };
+                let e = if w.plan[blk].incpl[ch] {
+                    cpl.expect("cpl").strt()
+                } else {
+                    bw_end
+                };
                 w.plan[blk].endmant[ch] = e;
                 w.range[blk][ch] = (0, e);
             }
@@ -264,7 +273,11 @@ impl SubEncoder {
         let coded_bins: usize = (0..nb)
             .map(|b| {
                 (0..nf).map(|ch| w.range[b][ch].1).sum::<usize>()
-                    + if w.plan[b].cplinu { w.range[b][CPL].1 - w.range[b][CPL].0 } else { 0 }
+                    + if w.plan[b].cplinu {
+                        w.range[b][CPL].1 - w.range[b][CPL].0
+                    } else {
+                        0
+                    }
             })
             .sum::<usize>()
             .max(1);
@@ -281,7 +294,11 @@ impl SubEncoder {
                 // bits per bin, the larger the level error tolerated before
                 // they are resent; the last resort sends them only where the
                 // syntax requires.
-                let tol = if lam > 0.0 { 0.02 / lam.max(0.05) } else { f32::INFINITY };
+                let tol = if lam > 0.0 {
+                    0.02 / lam.max(0.05)
+                } else {
+                    f32::INFINITY
+                };
                 self.plan_coupling(&mut w, tol);
             }
             self.plan_exponents(&mut w, lam);
@@ -308,11 +325,17 @@ impl SubEncoder {
         let fits = |snr: usize| -> bool {
             let (bits, _) = self.tally(&w, snr);
             let total: usize = side.total + bits.iter().sum::<usize>();
-            let blk01 = if p.eac3 { 0 } else { side.end_blk1 + bits[0] + bits.get(1).copied().unwrap_or(0) };
+            let blk01 = if p.eac3 {
+                0
+            } else {
+                side.end_blk1 + bits[0] + bits.get(1).copied().unwrap_or(0)
+            };
             total <= budget && (p.eac3 || blk01 <= five8)
         };
         if !fits(0) {
-            return Err(Error::Unsupported("bit rate too low for the side information".into()));
+            return Err(Error::Unsupported(
+                "bit rate too low for the side information".into(),
+            ));
         }
         let (mut lo, mut hi) = (0usize, 1023usize);
         if fits(hi) {
@@ -374,7 +397,9 @@ impl SubEncoder {
                 break (bits, baps);
             }
             if snr == 0 {
-                return Err(Error::Unsupported("cannot meet the A/52 §5.5 block-5 placement rule at this bit rate".into()));
+                return Err(Error::Unsupported(
+                    "cannot meet the A/52 §5.5 block-5 placement rule at this bit rate".into(),
+                ));
             }
             snr -= 1;
         };
@@ -444,7 +469,15 @@ impl SubEncoder {
                 let Some(m) = &w.masks[blk][ch] else { continue };
                 let (s, e) = w.range[blk][ch];
                 if snr != 0 {
-                    bap_from_mask(m, s, e, bp.floor, snr_offset((snr >> 4) as u8, (snr & 15) as u8), false, &mut baps[blk][ch]);
+                    bap_from_mask(
+                        m,
+                        s,
+                        e,
+                        bp.floor,
+                        snr_offset((snr >> 4) as u8, (snr & 15) as u8),
+                        false,
+                        &mut baps[blk][ch],
+                    );
                 }
                 t.add(&baps[blk][ch][s..e]);
             }
@@ -490,7 +523,9 @@ impl SubEncoder {
                 bp.incpl = [false; MAX_FBW];
             }
             bp.phsflginu = bp.cplinu && p.acmod == 2;
-            bp.cplstre = blk == 0 || bp.cplinu != prev_inu || (bp.cplinu && (bp.incpl != prev_in || bp.phsflginu != prev_phsinu));
+            bp.cplstre = blk == 0
+                || bp.cplinu != prev_inu
+                || (bp.cplinu && (bp.incpl != prev_in || bp.phsflginu != prev_phsinu));
             if !bp.cplinu {
                 held = [None; MAX_FBW];
                 held_phs = [false; 18];
@@ -601,7 +636,12 @@ impl SubEncoder {
             if !p.rematrix {
                 continue;
             }
-            let end = if bp.cplinu { p.cpl.expect("cpl").strt() } else { bw_end }.max(13);
+            let end = if bp.cplinu {
+                p.cpl.expect("cpl").strt()
+            } else {
+                bw_end
+            }
+            .max(13);
             let bounds = [13usize, 25, 37, 61, 253];
             let c = &mut w.coeffs[blk];
             for b in 0..bp.nrematbd {
@@ -669,7 +709,11 @@ impl SubEncoder {
                 must_new,
                 start: (0..nb).map(|b| w.range[b][ch].0).collect(),
                 end: (0..nb).map(|b| w.range[b][ch].1).collect(),
-                set: if ch == CPL { Set::Coupling } else { Set::Absolute },
+                set: if ch == CPL {
+                    Set::Coupling
+                } else {
+                    Set::Absolute
+                },
                 choices: if ch == LFE { &[D15] } else { &[D15, D25, D45] },
                 lambda,
                 overhead: match ch {
@@ -719,9 +763,21 @@ impl SubEncoder {
                     if tracks[i].is_none() || ch == LFE {
                         continue;
                     }
-                    let row = if ch == CPL { cplrow.expect("row") } else { rows[ch] };
+                    let row = if ch == CPL {
+                        cplrow.expect("row")
+                    } else {
+                        rows[ch]
+                    };
                     let r = crate::tables::FRMEXPSTR[row as usize];
-                    strat[i] = (0..6).map(|b| if tracks[i].as_ref().unwrap().raw[b].is_some() { r[b] } else { REUSE }).collect();
+                    strat[i] = (0..6)
+                        .map(|b| {
+                            if tracks[i].as_ref().unwrap().raw[b].is_some() {
+                                r[b]
+                            } else {
+                                REUSE
+                            }
+                        })
+                        .collect();
                     // a row's block value can be "new" right after an absent
                     // block; code_track handles runs per present block
                 }
@@ -767,7 +823,9 @@ impl SubEncoder {
             prev_cpl = cplinu;
             for ch in 0..NCH {
                 w.masks[blk][ch] = None;
-                let Some(set) = &w.exps[blk][ch] else { continue };
+                let Some(set) = &w.exps[blk][ch] else {
+                    continue;
+                };
                 if ch == CPL && !cplinu {
                     continue;
                 }
@@ -780,13 +838,27 @@ impl SubEncoder {
                     LFE => Kind::Lfe,
                     _ => Kind::Fbw,
                 };
-                w.masks[blk][ch] = Some(compute_mask(&set.exps, s, e, p.fscod, &ba, fast_gain(FGAINCOD), kind, None));
+                w.masks[blk][ch] = Some(compute_mask(
+                    &set.exps,
+                    s,
+                    e,
+                    p.fscod,
+                    &ba,
+                    fast_gain(FGAINCOD),
+                    kind,
+                    None,
+                ));
             }
         }
     }
 
     /// Write (or, with `mant = None`, size) the syncframe.
-    fn layout(&self, w: &Work, words: usize, mant: Option<(&[Packer], usize)>) -> (Layout, Option<Vec<u8>>) {
+    fn layout(
+        &self,
+        w: &Work,
+        words: usize,
+        mant: Option<(&[Packer], usize)>,
+    ) -> (Layout, Option<Vec<u8>>) {
         match mant {
             None => {
                 let mut c = Counter::default();
@@ -802,11 +874,20 @@ impl SubEncoder {
     }
 
     #[allow(clippy::needless_range_loop)]
-    fn write<S: Sink>(&self, s: &mut S, w: &Work, words: usize, mant: Option<(&[Packer], usize)>) -> Layout {
+    fn write<S: Sink>(
+        &self,
+        s: &mut S,
+        w: &Work,
+        words: usize,
+        mant: Option<(&[Packer], usize)>,
+    ) -> Layout {
         let p = &self.p;
         let nf = p.nfchans;
         let nb = p.numblks;
-        let mut lay = Layout { mant_start: vec![0; nb], ..Default::default() };
+        let mut lay = Layout {
+            mant_start: vec![0; nb],
+            ..Default::default()
+        };
         let snr = mant.map_or(0, |m| m.1);
         let (csnr, fsnr) = ((snr >> 4) as u32, (snr & 15) as u32);
         // ---- syncinfo + bsi ----
@@ -817,7 +898,8 @@ impl SubEncoder {
         } else {
             s.put(0, 16); // crc1, solved last
             s.put(u32::from(p.fscod), 2);
-            let pad = usize::from(FRMSIZETAB[usize::from(p.frmsizecod)][usize::from(p.fscod)]) != words;
+            let pad =
+                usize::from(FRMSIZETAB[usize::from(p.frmsizecod)][usize::from(p.fscod)]) != words;
             s.put(u32::from(p.frmsizecod) + u32::from(pad), 6);
             self.write_ac3_bsi(s);
         }
@@ -1208,7 +1290,11 @@ impl SubEncoder {
                 for ch in 0..nf {
                     let row = match w.frame_exp.rows {
                         Some((rows, _)) => rows[ch],
-                        None => nearest_row(&(0..6).map(|b| w.plan.get(b).map_or(D45, |bp| bp.expstr[ch])).collect::<Vec<_>>()),
+                        None => nearest_row(
+                            &(0..6)
+                                .map(|b| w.plan.get(b).map_or(D45, |bp| bp.expstr[ch]))
+                                .collect::<Vec<_>>(),
+                        ),
                     };
                     s.put(u32::from(row), 5);
                 }
@@ -1264,7 +1350,11 @@ fn quantize_coords(ratio: &[f32]) -> (u8, [Co; 18]) {
     let mut min_e = i32::MAX;
     for (b, &r) in ratio.iter().enumerate() {
         let v = (r / 8.0).min(31.0 / 32.0);
-        e[b] = if v > 0.0 { (-v.log2()).floor().max(0.0) as i32 } else { 99 };
+        e[b] = if v > 0.0 {
+            (-v.log2()).floor().max(0.0) as i32
+        } else {
+            99
+        };
         // v·2^e ∈ [0.5, 1)
         min_e = min_e.min(e[b]);
     }
@@ -1274,11 +1364,19 @@ fn quantize_coords(ratio: &[f32]) -> (u8, [Co; 18]) {
         let v = (r / 8.0).min(31.0 / 32.0);
         let ce = e[b] - 3 * mstr;
         if ce >= 15 {
-            let m = (v * 2f32.powi(15 + 3 * mstr) * 16.0).round().clamp(0.0, 15.0);
-            out[b] = Co { exp: 15, mant: m as u8 };
+            let m = (v * 2f32.powi(15 + 3 * mstr) * 16.0)
+                .round()
+                .clamp(0.0, 15.0);
+            out[b] = Co {
+                exp: 15,
+                mant: m as u8,
+            };
         } else {
             let m = (v * 2f32.powi(e[b]) * 32.0 - 16.0).round().clamp(0.0, 15.0);
-            out[b] = Co { exp: ce as u8, mant: m as u8 };
+            out[b] = Co {
+                exp: ce as u8,
+                mant: m as u8,
+            };
         }
     }
     (mstr as u8, out)
@@ -1286,7 +1384,11 @@ fn quantize_coords(ratio: &[f32]) -> (u8, [Co; 18]) {
 
 /// The coordinate the decoder applies (§7.4.3, times its factor of 8).
 fn coord_value(c: Co, mstr: u8) -> f32 {
-    let temp = if c.exp == 15 { f32::from(c.mant) / 16.0 } else { (f32::from(c.mant) + 16.0) / 32.0 };
+    let temp = if c.exp == 15 {
+        f32::from(c.mant) / 16.0
+    } else {
+        (f32::from(c.mant) + 16.0) / 32.0
+    };
     8.0 * temp / (1u64 << (u32::from(c.exp) + 3 * u32::from(mstr))) as f32
 }
 
@@ -1313,7 +1415,11 @@ mod tests {
 
     #[test]
     fn coupling_bands_follow_the_band_structure() {
-        let cr = CplRange { begf: 6, endf: 12, bndstrc: crate::tables::DEFCPLBNDSTRC };
+        let cr = CplRange {
+            begf: 6,
+            endf: 12,
+            bndstrc: crate::tables::DEFCPLBNDSTRC,
+        };
         // sub-bands 6..=14 (nsub 9); Table E2.12 merges 8 into 7, 10–11 into 9, 13–14 into 12
         assert_eq!(cr.nsub(), 9);
         assert_eq!(cr.strt(), 109);

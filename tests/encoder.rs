@@ -18,7 +18,10 @@
 //! Run with `--nocapture` for the measured numbers.
 
 use ac3::tables::{BITRATE_KBPS, FRMSIZETAB};
-use ac3::{Config, Coupling, Encoder, Error, Format, FrameDecoder, Layout, Speaker, frame_crc_ok, parse_header};
+use ac3::{
+    Config, Coupling, Encoder, Error, Format, FrameDecoder, Layout, Speaker, frame_crc_ok,
+    parse_header,
+};
 
 /// CRC-16, x¹⁶ + x¹⁵ + x² + 1, zero initial state, MSB first (§7.10.1).
 fn crc16(data: &[u8]) -> u16 {
@@ -26,7 +29,11 @@ fn crc16(data: &[u8]) -> u16 {
     for &b in data {
         crc ^= u16::from(b) << 8;
         for _ in 0..8 {
-            crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x8005 } else { crc << 1 };
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x8005
+            } else {
+                crc << 1
+            };
         }
     }
     crc
@@ -86,21 +93,36 @@ fn check_stream(cfg: &Config, aus: &[Vec<u8>]) -> Decoded {
                 assert_eq!(h.bsid, 8);
                 assert_eq!(h.bsmod, cfg.bsmod);
                 let code = (frame[4] & 0x3f) as usize;
-                assert_eq!(h.frame_len, usize::from(FRMSIZETAB[code][fscod as usize]) * 2, "frame {n}: Table 5.18 size");
+                assert_eq!(
+                    h.frame_len,
+                    usize::from(FRMSIZETAB[code][fscod as usize]) * 2,
+                    "frame {n}: Table 5.18 size"
+                );
                 assert_eq!(h.bitrate_kbps, cfg.bitrate_kbps);
                 let five8 = (words >> 1) + (words >> 3);
-                assert_eq!(crc16(&frame[2..five8 * 2]), 0, "frame {n}: crc1 at the 5/8 point");
+                assert_eq!(
+                    crc16(&frame[2..five8 * 2]),
+                    0,
+                    "frame {n}: crc1 at the 5/8 point"
+                );
                 if !sizes.contains(&h.frame_len) {
                     sizes.push(h.frame_len);
                 }
             } else {
                 assert_eq!(h.bsid, 16);
                 assert_eq!(h.substreamid, 0);
-                assert_eq!(h.strmtyp, sub as u8, "independent first, then the dependent substream");
+                assert_eq!(
+                    h.strmtyp, sub as u8,
+                    "independent first, then the dependent substream"
+                );
             }
             assert_eq!(h.dialnorm, cfg.dialnorm);
             if sub == 0 {
-                let expect = if seven_one { 5 + usize::from(cfg.lfe) } else { cfg.channels() };
+                let expect = if seven_one {
+                    5 + usize::from(cfg.lfe)
+                } else {
+                    cfg.channels()
+                };
                 assert_eq!(h.channels(), expect);
                 if !seven_one {
                     assert_eq!(h.speakers(), cfg.layout.speakers(cfg.lfe));
@@ -118,20 +140,33 @@ fn check_stream(cfg: &Config, aus: &[Vec<u8>]) -> Decoded {
             }
             let d = if sub == 0 { &mut dec } else { &mut dep_dec };
             let mut pcm = Vec::new();
-            let got = d.decode(frame, &mut pcm).unwrap_or_else(|e| panic!("frame {n} substream {sub}: {e}"));
+            let got = d
+                .decode(frame, &mut pcm)
+                .unwrap_or_else(|e| panic!("frame {n} substream {sub}: {e}"));
             assert!(got.is_some(), "frame {n} substream {sub} skipped");
             let blocks = d.block_bit_ranges().to_vec();
             assert_eq!(blocks.len(), h.numblks);
             let end = blocks.last().unwrap().1;
             assert!(end <= bits - 18, "frame {n}: audio runs into errorcheck");
             for b in end..bits - 18 {
-                assert!(!bit(frame, b), "frame {n}: non-zero padding at bit {b} (audio ended at {end})");
+                assert!(
+                    !bit(frame, b),
+                    "frame {n}: non-zero padding at bit {b} (audio ended at {end})"
+                );
             }
             assert!(!bit(frame, bits - 18), "frame {n}: auxdatae");
             if !h.eac3 {
                 let five8 = ((words >> 1) + (words >> 3)) * 16;
-                assert!(blocks[1].1 <= five8, "frame {n}: blocks 0-1 end at {} > 5/8 {five8}", blocks[1].1);
-                assert!(blocks[5].0 >= five8, "frame {n}: block 5 mantissas start at {} < 5/8 {five8}", blocks[5].0);
+                assert!(
+                    blocks[1].1 <= five8,
+                    "frame {n}: blocks 0-1 end at {} > 5/8 {five8}",
+                    blocks[1].1
+                );
+                assert!(
+                    blocks[5].0 >= five8,
+                    "frame {n}: block 5 mantissas start at {} < 5/8 {five8}",
+                    blocks[5].0
+                );
             }
             if sub == 0 {
                 out.extend_from_slice(&pcm);
@@ -148,8 +183,18 @@ fn check_stream(cfg: &Config, aus: &[Vec<u8>]) -> Decoded {
     // a word (and the rounding of a partial word) per substream.
     let nominal = u64::from(cfg.bitrate_kbps) * 1000 * samples_total / u64::from(fs);
     let subs = if seven_one { 2 } else { 1 };
-    assert!(nominal.abs_diff(total_bits) <= 32 * subs, "{total_bits} bits written vs {nominal} nominal");
-    Decoded { pcm: out, dep, channels, frames: aus.len(), features: dec.features(), sizes }
+    assert!(
+        nominal.abs_diff(total_bits) <= 32 * subs,
+        "{total_bits} bits written vs {nominal} nominal"
+    );
+    Decoded {
+        pcm: out,
+        dep,
+        channels,
+        frames: aus.len(),
+        features: dec.features(),
+        sizes,
+    }
 }
 
 fn encode(cfg: Config, pcm: &[f32]) -> Vec<Vec<u8>> {
@@ -185,7 +230,14 @@ fn music(ch: usize, n: usize, fs: u32) -> Vec<f32> {
         .map(|i| {
             let t = i as f32 / fs as f32;
             let mut v = 0.0;
-            for (k, a) in [(1.0f32, 0.25f32), (2.0, 0.12), (3.0, 0.08), (5.0, 0.04), (8.0, 0.02), (13.0, 0.01)] {
+            for (k, a) in [
+                (1.0f32, 0.25f32),
+                (2.0, 0.12),
+                (3.0, 0.08),
+                (5.0, 0.04),
+                (8.0, 0.02),
+                (13.0, 0.01),
+            ] {
                 v += a * (2.0 * std::f32::consts::PI * base * k * t).sin();
             }
             v += 0.1 * (-(t % 0.25) * 30.0).exp() * (2.0 * std::f32::consts::PI * 1800.0 * t).sin();
@@ -218,7 +270,9 @@ fn signal(cfg: &Config, seconds: f32) -> Vec<f32> {
         .enumerate()
         .map(|(c, s)| {
             if *s == Speaker::LFE {
-                (0..n).map(|i| 0.3 * (2.0 * std::f32::consts::PI * 60.0 * i as f32 / fs as f32).sin()).collect()
+                (0..n)
+                    .map(|i| 0.3 * (2.0 * std::f32::consts::PI * 60.0 * i as f32 / fs as f32).sin())
+                    .collect()
             } else {
                 music(c, n, fs)
             }
@@ -230,7 +284,16 @@ fn signal(cfg: &Config, seconds: f32) -> Vec<f32> {
 /// SNR in dB of decoded channel `gch` of `got` (delayed by the encoder's 256
 /// samples) against input channel `ch`, over input samples `from..to`.
 #[allow(clippy::too_many_arguments)]
-fn snr(want: &[f32], ch: usize, nw: usize, got: &[f32], gch: usize, ng: usize, from: usize, to: usize) -> f64 {
+fn snr(
+    want: &[f32],
+    ch: usize,
+    nw: usize,
+    got: &[f32],
+    gch: usize,
+    ng: usize,
+    from: usize,
+    to: usize,
+) -> f64 {
     let (mut s, mut e) = (0.0f64, 0.0f64);
     for i in from..to {
         let a = f64::from(want[i * nw + ch]);
@@ -249,19 +312,41 @@ fn roundtrip(cfg: Config) -> (Vec<f64>, Decoded) {
     let n = pcm.len() / nch;
     let aus = encode(cfg, &pcm);
     let d = check_stream(&cfg, &aus);
-    assert!(d.pcm.len() / d.channels >= n + 256, "flush must cover the input and the delay");
+    assert!(
+        d.pcm.len() / d.channels >= n + 256,
+        "flush must cover the input and the delay"
+    );
     let (from, to) = (1536, n - 1536);
     let spk = cfg.layout.speakers(cfg.lfe);
-    let main = if cfg.layout == Layout::ThreeFour { Layout::ThreeTwo.speakers(cfg.lfe) } else { spk.clone() };
+    let main = if cfg.layout == Layout::ThreeFour {
+        Layout::ThreeTwo.speakers(cfg.lfe)
+    } else {
+        spk.clone()
+    };
     // 7.1: the fronts and the LFE from substream 0, the surrounds from the
     // dependent substream (substream 0's are the downmix they replace).
     let dep = [Speaker::SL, Speaker::SR, Speaker::BL, Speaker::BR];
     let s = spk
         .iter()
         .enumerate()
-        .map(|(c, sp)| match dep.iter().position(|m| m == sp).filter(|_| cfg.layout == Layout::ThreeFour) {
-            Some(g) => snr(&pcm, c, nch, &d.dep, g, 4, from, to),
-            None => snr(&pcm, c, nch, &d.pcm, main.iter().position(|m| m == sp).unwrap(), main.len(), from, to),
+        .map(|(c, sp)| {
+            match dep
+                .iter()
+                .position(|m| m == sp)
+                .filter(|_| cfg.layout == Layout::ThreeFour)
+            {
+                Some(g) => snr(&pcm, c, nch, &d.dep, g, 4, from, to),
+                None => snr(
+                    &pcm,
+                    c,
+                    nch,
+                    &d.pcm,
+                    main.iter().position(|m| m == sp).unwrap(),
+                    main.len(),
+                    from,
+                    to,
+                ),
+            }
         })
         .collect();
     (s, d)
@@ -296,7 +381,12 @@ fn ac3_every_layout_rate_and_sample_rate() {
                     if fs == 44_100 {
                         let words = f64::from(kbps) * 1000.0 * 1536.0 / 44_100.0 / 16.0;
                         if d.frames as f64 * words.fract() >= 1.5 {
-                            assert_eq!(d.sizes.len(), 2, "{kbps} kbit/s at 44.1 kHz: {:?}", d.sizes);
+                            assert_eq!(
+                                d.sizes.len(),
+                                2,
+                                "{kbps} kbit/s at 44.1 kHz: {:?}",
+                                d.sizes
+                            );
                         }
                     }
                     n += 1;
@@ -312,7 +402,9 @@ fn ac3_every_layout_rate_and_sample_rate() {
 /// carry it (6144 kbit/s needs 48 kHz; 7.1 needs at least 64 kbit/s).
 #[test]
 fn eac3_every_layout_and_rate() {
-    let rates = [32u32, 48, 64, 96, 128, 192, 256, 384, 448, 640, 768, 1024, 1536, 2048, 3072, 4096, 6144];
+    let rates = [
+        32u32, 48, 64, 96, 128, 192, 256, 384, 448, 640, 768, 1024, 1536, 2048, 3072, 4096, 6144,
+    ];
     let mut ok = 0;
     let mut refused = Vec::new();
     for layout in LAYOUTS.iter().copied().chain([Layout::ThreeFour]) {
@@ -334,10 +426,14 @@ fn eac3_every_layout_and_rate() {
         }
     }
     for &(layout, _lfe, fs, kbps) in &refused {
-        let expected = (kbps == 6144 && fs != 48_000) || (layout == Layout::ThreeFour && (kbps <= 48 || (kbps == 6144 && fs == 32_000)));
+        let expected = (kbps == 6144 && fs != 48_000)
+            || (layout == Layout::ThreeFour && (kbps <= 48 || (kbps == 6144 && fs == 32_000)));
         assert!(expected, "{layout:?} {fs} {kbps}: refused");
     }
-    println!("{ok} E-AC-3 configurations checked, {} refused as expected", refused.len());
+    println!(
+        "{ok} E-AC-3 configurations checked, {} refused as expected",
+        refused.len()
+    );
 }
 
 /// Per-channel SNR through the decoder, with the coding tools each case
@@ -352,7 +448,14 @@ fn round_trip_snr() {
         kbps: u32,
         min_db: f64,
     }
-    let c = |format, fs, layout, lfe, kbps, min_db| Case { format, fs, layout, lfe, kbps, min_db };
+    let c = |format, fs, layout, lfe, kbps, min_db| Case {
+        format,
+        fs,
+        layout,
+        lfe,
+        kbps,
+        min_db,
+    };
     use Format::*;
     use Layout::*;
     let cases = [
@@ -389,12 +492,18 @@ fn round_trip_snr() {
             d.features
         );
         for (ch, v) in s.iter().enumerate() {
-            assert!(*v >= k.min_db, "{cfg:?}: channel {ch} SNR {v:.1} dB < {}", k.min_db);
+            assert!(
+                *v >= k.min_db,
+                "{cfg:?}: channel {ch} SNR {v:.1} dB < {}",
+                k.min_db
+            );
         }
         let f = d.features;
         let coupled = f.cpl_blocks > 0;
         match (k.layout, k.kbps) {
-            (Stereo, 96 | 128) => assert!(coupled && f.phsflg_blocks > 0 && f.remat_blocks > 0, "{f}"),
+            (Stereo, 96 | 128) => {
+                assert!(coupled && f.phsflg_blocks > 0 && f.remat_blocks > 0, "{f}")
+            }
             (Stereo, _) => assert!(!coupled && f.remat_blocks > 0, "{f}"),
             // 7.1 codes nine channels and the LFE (substream 0's 5.1
             // downmix, then SL SR BL BR): about 83 kbit/s a channel at 768.
@@ -406,7 +515,10 @@ fn round_trip_snr() {
         // 8 kHz, but the stream's first note is not one either: the detector
         // stays quiet on this material.
         if k.format == Eac3 && d.frames > 0 && k.kbps <= 768 {
-            assert!(f.frmexpstr_frames > 0, "Table E2.10 frame strategies never chosen: {f}");
+            assert!(
+                f.frmexpstr_frames > 0,
+                "Table E2.10 frame strategies never chosen: {f}"
+            );
         }
     }
 }
@@ -417,7 +529,13 @@ fn sine_gain(cfg: Config, f: f32) -> Vec<f64> {
     let n = fs as usize / 2;
     let nch = cfg.channels();
     let chans: Vec<Vec<f32>> = (0..nch)
-        .map(|c| (0..n).map(|i| 0.3 * (2.0 * std::f32::consts::PI * f * i as f32 / fs as f32 + c as f32).sin()).collect())
+        .map(|c| {
+            (0..n)
+                .map(|i| {
+                    0.3 * (2.0 * std::f32::consts::PI * f * i as f32 / fs as f32 + c as f32).sin()
+                })
+                .collect()
+        })
         .collect();
     let pcm = interleave(&chans);
     let d = check_stream(&cfg, &encode(cfg, &pcm));
@@ -447,16 +565,27 @@ fn frequency_response() {
     for (format, layout, kbps, top) in cases {
         let cfg = Config::new(format, 48_000, layout, false, kbps);
         let mut line = String::new();
-        for f in [50.0f32, 100.0, 250.0, 1000.0, 4000.0, 8000.0, 10_000.0, 12_000.0, 14_000.0, 16_000.0, 18_000.0, 19_500.0] {
+        for f in [
+            50.0f32, 100.0, 250.0, 1000.0, 4000.0, 8000.0, 10_000.0, 12_000.0, 14_000.0, 16_000.0,
+            18_000.0, 19_500.0,
+        ] {
             let g = sine_gain(cfg, f);
-            let worst = g.iter().fold(0.0f64, |m, v| if v.abs() > m.abs() { *v } else { m });
+            let worst = g
+                .iter()
+                .fold(0.0f64, |m, v| if v.abs() > m.abs() { *v } else { m });
             line += &format!(" {:.0}k:{worst:+.2}", f / 1000.0);
             if f <= top {
-                assert!(worst.abs() <= 0.5, "{format:?} {layout:?} {kbps}: {f} Hz at {worst:+.2} dB");
+                assert!(
+                    worst.abs() <= 0.5,
+                    "{format:?} {layout:?} {kbps}: {f} Hz at {worst:+.2} dB"
+                );
             }
         }
         let above = sine_gain(cfg, 22_000.0);
-        assert!(above.iter().all(|g| *g < -40.0), "above the bandwidth: {above:?}");
+        assert!(
+            above.iter().all(|g| *g < -40.0),
+            "above the bandwidth: {above:?}"
+        );
         println!("{format:?} {layout:?} {kbps} kbit/s, dB:{line}");
     }
 }
@@ -470,27 +599,50 @@ fn pre_echo(cfg: Config) -> (f64, u64) {
     let onset = 12_000 + 77; // not block-aligned
     let mut r = Rng(12345);
     let burst: Vec<f32> = (0..n)
-        .map(|i| if i >= onset { 0.7 * r.next() * (-((i - onset) as f32) / 2000.0).exp() } else { 0.0 })
+        .map(|i| {
+            if i >= onset {
+                0.7 * r.next() * (-((i - onset) as f32) / 2000.0).exp()
+            } else {
+                0.0
+            }
+        })
         .collect();
     let nch = cfg.channels();
     let pcm = interleave(&vec![burst; nch]);
     let d = check_stream(&cfg, &encode(cfg, &pcm));
-    let e = |a: usize, b: usize| -> f64 { (a..b).map(|i| f64::from(d.pcm[(i + 256) * nch]).powi(2)).sum::<f64>() / (b - a) as f64 };
+    let e = |a: usize, b: usize| -> f64 {
+        (a..b)
+            .map(|i| f64::from(d.pcm[(i + 256) * nch]).powi(2))
+            .sum::<f64>()
+            / (b - a) as f64
+    };
     let blk_start = onset / 256 * 256;
-    (10.0 * (e(blk_start - 768, blk_start) / e(onset, onset + 1024)).log10(), d.features.blksw_chblocks)
+    (
+        10.0 * (e(blk_start - 768, blk_start) / e(onset, onset + 1024)).log10(),
+        d.features.blksw_chblocks,
+    )
 }
 
 #[test]
 fn block_switching_confines_pre_echo() {
-    for (format, layout, kbps) in [(Format::Ac3, Layout::Stereo, 192), (Format::Ac3, Layout::ThreeTwo, 448), (Format::Eac3, Layout::Stereo, 128)] {
+    for (format, layout, kbps) in [
+        (Format::Ac3, Layout::Stereo, 192),
+        (Format::Ac3, Layout::ThreeTwo, 448),
+        (Format::Eac3, Layout::Stereo, 128),
+    ] {
         let mut cfg = Config::new(format, 48_000, layout, false, kbps);
         let (on, switched) = pre_echo(cfg);
         cfg.block_switching = false;
         let (off, none) = pre_echo(cfg);
-        println!("{format:?} {layout:?} {kbps} kbit/s: pre-echo {on:.1} dB with block switching ({switched} short channel-blocks), {off:.1} dB without");
+        println!(
+            "{format:?} {layout:?} {kbps} kbit/s: pre-echo {on:.1} dB with block switching ({switched} short channel-blocks), {off:.1} dB without"
+        );
         assert!(switched > 0 && none == 0);
         assert!(on < -80.0, "pre-echo with block switching: {on:.1} dB");
-        assert!(off > on + 30.0, "block switching should matter: {on:.1} vs {off:.1}");
+        assert!(
+            off > on + 30.0,
+            "block switching should matter: {on:.1} vs {off:.1}"
+        );
     }
 }
 
@@ -505,7 +657,9 @@ fn silence_full_scale_and_clipping_stay_valid() {
         assert!(d.pcm.iter().all(|v| v.abs() < 1e-5));
         // a full-scale square wave, and input beyond full scale
         for amp in [1.0f32, 3.0] {
-            let pcm: Vec<f32> = (0..n * 6).map(|i| if (i / 6 / 40) % 2 == 0 { amp } else { -amp }).collect();
+            let pcm: Vec<f32> = (0..n * 6)
+                .map(|i| if (i / 6 / 40) % 2 == 0 { amp } else { -amp })
+                .collect();
             check_stream(&cfg, &encode(cfg, &pcm));
         }
     }
@@ -535,26 +689,97 @@ fn chunking_does_not_change_the_stream() {
 
 #[test]
 fn api_reports_layout_and_refuses_what_it_cannot_do() {
-    let e = Encoder::new(Config::new(Format::Ac3, 48_000, Layout::ThreeTwo, true, 448)).unwrap();
-    assert_eq!(e.speakers(), vec![Speaker::FL, Speaker::FR, Speaker::FC, Speaker::LFE, Speaker::SL, Speaker::SR]);
-    assert_eq!((e.frame_samples(), e.delay()), (1536, 256));
-    let e = Encoder::new(Config::new(Format::Eac3, 48_000, Layout::ThreeFour, true, 1024)).unwrap();
+    let e = Encoder::new(Config::new(
+        Format::Ac3,
+        48_000,
+        Layout::ThreeTwo,
+        true,
+        448,
+    ))
+    .unwrap();
     assert_eq!(
         e.speakers(),
-        vec![Speaker::FL, Speaker::FR, Speaker::FC, Speaker::LFE, Speaker::BL, Speaker::BR, Speaker::SL, Speaker::SR]
+        vec![
+            Speaker::FL,
+            Speaker::FR,
+            Speaker::FC,
+            Speaker::LFE,
+            Speaker::SL,
+            Speaker::SR
+        ]
+    );
+    assert_eq!((e.frame_samples(), e.delay()), (1536, 256));
+    let e = Encoder::new(Config::new(
+        Format::Eac3,
+        48_000,
+        Layout::ThreeFour,
+        true,
+        1024,
+    ))
+    .unwrap();
+    assert_eq!(
+        e.speakers(),
+        vec![
+            Speaker::FL,
+            Speaker::FR,
+            Speaker::FC,
+            Speaker::LFE,
+            Speaker::BL,
+            Speaker::BR,
+            Speaker::SL,
+            Speaker::SR
+        ]
     );
     // E-AC-3 at high rates uses fewer blocks per frame to stay within 2048 words
-    assert_eq!(Encoder::new(Config::new(Format::Eac3, 48_000, Layout::Stereo, false, 6144)).unwrap().frame_samples(), 256);
+    assert_eq!(
+        Encoder::new(Config::new(
+            Format::Eac3,
+            48_000,
+            Layout::Stereo,
+            false,
+            6144
+        ))
+        .unwrap()
+        .frame_samples(),
+        256
+    );
     let bad = |c: Config| matches!(Encoder::new(c), Err(Error::InvalidInput(_)));
-    assert!(bad(Config::new(Format::Ac3, 48_000, Layout::Stereo, false, 200)), "not a Table 5.18 rate");
-    assert!(bad(Config::new(Format::Ac3, 96_000, Layout::Stereo, false, 192)));
-    assert!(bad(Config::new(Format::Ac3, 48_000, Layout::ThreeFour, true, 640)), "7.1 is E-AC-3 only");
-    assert!(bad(Config::new(Format::Eac3, 48_000, Layout::Stereo, false, 7000)));
+    assert!(
+        bad(Config::new(Format::Ac3, 48_000, Layout::Stereo, false, 200)),
+        "not a Table 5.18 rate"
+    );
+    assert!(bad(Config::new(
+        Format::Ac3,
+        96_000,
+        Layout::Stereo,
+        false,
+        192
+    )));
+    assert!(
+        bad(Config::new(
+            Format::Ac3,
+            48_000,
+            Layout::ThreeFour,
+            true,
+            640
+        )),
+        "7.1 is E-AC-3 only"
+    );
+    assert!(bad(Config::new(
+        Format::Eac3,
+        48_000,
+        Layout::Stereo,
+        false,
+        7000
+    )));
     let mut c = Config::new(Format::Ac3, 48_000, Layout::Stereo, false, 192);
     c.dialnorm = 0;
     assert!(bad(c));
     let mut e = Encoder::new(Config::new(Format::Ac3, 48_000, Layout::Stereo, false, 192)).unwrap();
-    assert!(matches!(e.encode(&[0.0; 3]), Err(Error::InvalidInput(_))), "not whole interleaved frames");
+    assert!(
+        matches!(e.encode(&[0.0; 3]), Err(Error::InvalidInput(_))),
+        "not whole interleaved frames"
+    );
 }
 
 #[test]
@@ -599,8 +824,11 @@ fn seven_one_decodes_to_eight_channels_each_in_its_place() {
     assert_eq!(speakers, vec![FL, FR, FC, LFE, BL, BR, SL, SR]);
     let tones = [400.0, 600.0, 800.0, 50.0, 1000.0, 1200.0, 1400.0, 1600.0];
     let n = 48_000;
-    let pcm: Vec<f32> =
-        (0..n * 8).map(|i| (0.25 * (std::f64::consts::TAU * tones[i % 8] * (i / 8) as f64 / 48_000.0).sin()) as f32).collect();
+    let pcm: Vec<f32> = (0..n * 8)
+        .map(|i| {
+            (0.25 * (std::f64::consts::TAU * tones[i % 8] * (i / 8) as f64 / 48_000.0).sin()) as f32
+        })
+        .collect();
     let aus = encode(cfg, &pcm);
     let decode = |chunks: Vec<&[u8]>| {
         let mut dec = ac3::Decoder::new();
@@ -614,7 +842,11 @@ fn seven_one_decodes_to_eight_channels_each_in_its_place() {
     let whole = decode(aus.iter().map(Vec::as_slice).collect());
     let joined: Vec<u8> = aus.concat();
     assert_eq!(whole, decode(vec![&joined]), "one byte string");
-    assert_eq!(whole, decode(joined.chunks(97).collect()), "cut every 97 bytes");
+    assert_eq!(
+        whole,
+        decode(joined.chunks(97).collect()),
+        "cut every 97 bytes"
+    );
     // Cut exactly between each access unit's independent and dependent
     // substream: once the stream has shown it has dependent substreams the
     // decoder waits for them; the very first frame, with nothing yet to say
@@ -632,11 +864,20 @@ fn seven_one_decodes_to_eight_channels_each_in_its_place() {
     for f in &whole {
         assert_eq!((f.channels, f.speakers()), (8, speakers.clone()));
     }
-    let out: Vec<f32> = whole.iter().flat_map(|f| f.samples.iter().copied()).collect();
+    let out: Vec<f32> = whole
+        .iter()
+        .flat_map(|f| f.samples.iter().copied())
+        .collect();
     // Past the encoder's start-up, a whole number of 50 Hz periods.
     let from = 8 * 4800;
     for (c, &own) in tones.iter().enumerate() {
-        let ch: Vec<f32> = out[from..].iter().skip(c).step_by(8).copied().take(38_400).collect();
+        let ch: Vec<f32> = out[from..]
+            .iter()
+            .skip(c)
+            .step_by(8)
+            .copied()
+            .take(38_400)
+            .collect();
         let level = tone_amplitude(&ch, own, 48_000);
         let worst = tones
             .iter()
@@ -650,8 +891,18 @@ fn seven_one_decodes_to_eight_channels_each_in_its_place() {
             worst.0,
             20.0 * (worst.1 / 0.25).log10()
         );
-        assert!((20.0 * (level / 0.25).log10()).abs() < 1.0, "{}: its own tone at {level:.4}", speakers[c]);
-        assert!(worst.1 < 0.25 * 0.001, "{}: {} Hz at {:.4}", speakers[c], worst.0, worst.1);
+        assert!(
+            (20.0 * (level / 0.25).log10()).abs() < 1.0,
+            "{}: its own tone at {level:.4}",
+            speakers[c]
+        );
+        assert!(
+            worst.1 < 0.25 * 0.001,
+            "{}: {} Hz at {:.4}",
+            speakers[c],
+            worst.0,
+            worst.1
+        );
     }
 }
 
@@ -669,8 +920,11 @@ fn seven_one_substream_zero_is_a_five_one_downmix() {
     let tones = [400.0, 600.0, 800.0, 50.0, 1000.0, 1200.0, 1400.0, 1600.0];
     let tone_of = |s: Speaker| tones[speakers.iter().position(|&x| x == s).unwrap()];
     let n = 48_000;
-    let pcm: Vec<f32> =
-        (0..n * 8).map(|i| (0.25 * (std::f64::consts::TAU * tones[i % 8] * (i / 8) as f64 / 48_000.0).sin()) as f32).collect();
+    let pcm: Vec<f32> = (0..n * 8)
+        .map(|i| {
+            (0.25 * (std::f64::consts::TAU * tones[i % 8] * (i / 8) as f64 / 48_000.0).sin()) as f32
+        })
+        .collect();
     let aus = encode(cfg, &pcm);
     let mut dec = ac3::Decoder::new();
     dec.set_independent_only(true);
@@ -684,12 +938,21 @@ fn seven_one_substream_zero_is_a_five_one_downmix() {
     for f in &frames {
         assert_eq!((f.channels, f.speakers()), (6, five_one.clone()));
     }
-    let out: Vec<f32> = frames.iter().flat_map(|f| f.samples.iter().copied()).collect();
+    let out: Vec<f32> = frames
+        .iter()
+        .flat_map(|f| f.samples.iter().copied())
+        .collect();
     let from = 6 * 4800;
     let db = |a: f64| 20.0 * (a / 0.25).log10();
     let minus3 = 20.0 * std::f64::consts::FRAC_1_SQRT_2.log10();
     for (c, &spk) in five_one.iter().enumerate() {
-        let ch: Vec<f32> = out[from..].iter().skip(c).step_by(6).copied().take(38_400).collect();
+        let ch: Vec<f32> = out[from..]
+            .iter()
+            .skip(c)
+            .step_by(6)
+            .copied()
+            .take(38_400)
+            .collect();
         let (want, gain): (Vec<Speaker>, f64) = match spk {
             SL => (vec![SL, BL], minus3),
             SR => (vec![SR, BR], minus3),
@@ -698,9 +961,15 @@ fn seven_one_substream_zero_is_a_five_one_downmix() {
         for &s in &want {
             let level = db(tone_amplitude(&ch, tone_of(s), 48_000));
             eprintln!("7.1 substream 0 {spk}: {s}'s tone at {level:+.2} dB (want {gain:+.2})");
-            assert!((level - gain).abs() < 0.5, "{spk}: {s}'s tone at {level:+.2} dB, want {gain:+.2}");
+            assert!(
+                (level - gain).abs() < 0.5,
+                "{spk}: {s}'s tone at {level:+.2} dB, want {gain:+.2}"
+            );
         }
-        for &t in tones.iter().filter(|&&t| !want.iter().any(|&s| tone_of(s) == t)) {
+        for &t in tones
+            .iter()
+            .filter(|&&t| !want.iter().any(|&s| tone_of(s) == t))
+        {
             let level = db(tone_amplitude(&ch, t, 48_000));
             assert!(level < -60.0, "{spk}: {t} Hz at {level:.1} dB");
         }

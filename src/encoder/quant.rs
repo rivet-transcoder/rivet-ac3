@@ -108,7 +108,14 @@ impl Packer {
     /// significant (`v = 9a + 3b + c` for bap 1, `25a + 5b + c` for bap 2,
     /// `11a + b` for bap 4). A fresh group starts with every member at the
     /// zero level, `(levels − 1)/2`.
-    fn grouped(items: &mut Vec<(u32, u32)>, open: &mut Option<(usize, u8)>, code: u32, levels: u32, n: u8, bits: u32) {
+    fn grouped(
+        items: &mut Vec<(u32, u32)>,
+        open: &mut Option<(usize, u8)>,
+        code: u32,
+        levels: u32,
+        n: u8,
+        bits: u32,
+    ) {
         let zero = (levels - 1) / 2;
         let (idx, filled) = match open.take() {
             Some(o) => o,
@@ -137,7 +144,13 @@ mod tests {
 
     #[test]
     fn symmetric_levels_are_the_spec_tables() {
-        let tabs: [&[f32]; 5] = [&SYM_QUANT_3, &SYM_QUANT_5, &SYM_QUANT_7, &SYM_QUANT_11, &SYM_QUANT_15];
+        let tabs: [&[f32]; 5] = [
+            &SYM_QUANT_3,
+            &SYM_QUANT_5,
+            &SYM_QUANT_7,
+            &SYM_QUANT_11,
+            &SYM_QUANT_15,
+        ];
         for (b, t) in tabs.iter().enumerate() {
             let bap = b as u8 + 1;
             for (i, v) in t.iter().enumerate() {

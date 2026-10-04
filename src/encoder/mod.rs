@@ -138,7 +138,13 @@ pub struct Config {
 impl Config {
     /// A configuration with the defaults: `bsmod` 0, `dialnorm` 31,
     /// automatic coupling, rematrixing and block switching on.
-    pub fn new(format: Format, sample_rate: u32, layout: Layout, lfe: bool, bitrate_kbps: u32) -> Self {
+    pub fn new(
+        format: Format,
+        sample_rate: u32,
+        layout: Layout,
+        lfe: bool,
+        bitrate_kbps: u32,
+    ) -> Self {
         Self {
             format,
             sample_rate,
@@ -221,7 +227,10 @@ pub struct Encoder {
 
 impl std::fmt::Debug for Encoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Encoder").field("config", &self.cfg).field("buffered", &self.buf.first().map_or(0, Vec::len)).finish()
+        f.debug_struct("Encoder")
+            .field("config", &self.cfg)
+            .field("buffered", &self.buf.first().map_or(0, Vec::len))
+            .finish()
     }
 }
 
@@ -243,7 +252,9 @@ fn tune(kbps: f32, nf: usize, lfe: bool, acmod: u8, fs: u32, coupling: Coupling)
     let r = kbps / (nf as f32 + if lfe { 0.25 } else { 0.0 });
     // Audio bandwidth for a channel coded on its own.
     let fb = (4000.0 + r * 125.0).clamp(4000.0, 20000.0);
-    let bw_from = |hz: f32| -> u8 { (((bin_of(hz, fs) - 37.0) / 3.0).round() as i32 - 12).clamp(0, 60) as u8 };
+    let bw_from = |hz: f32| -> u8 {
+        (((bin_of(hz, fs) - 37.0) / 3.0).round() as i32 - 12).clamp(0, 60) as u8
+    };
     let can = nf >= 2 && acmod != 0;
     let want = match coupling {
         Coupling::Off => false,
@@ -251,17 +262,27 @@ fn tune(kbps: f32, nf: usize, lfe: bool, acmod: u8, fs: u32, coupling: Coupling)
         Coupling::Auto => can && r < 96.0,
     };
     if !want {
-        return Tuning { bwcod: bw_from(fb), cpl: None };
+        return Tuning {
+            bwcod: bw_from(fb),
+            cpl: None,
+        };
     }
     let fc = (3000.0 + r * 100.0).clamp(4500.0, 15000.0);
     let fe = (8000.0 + r * 120.0).clamp(fc + 2000.0, 20000.0);
     let begf = (((bin_of(fc, fs) - 37.0) / 12.0).round() as i32).clamp(0, 15);
     let endf = ((((bin_of(fe, fs) - 37.0) / 12.0).round() as i32) - 3).clamp((begf - 1).max(0), 15);
-    let cpl = CplRange { begf: begf as u8, endf: endf as u8, bndstrc: DEFCPLBNDSTRC };
+    let cpl = CplRange {
+        begf: begf as u8,
+        endf: endf as u8,
+        bndstrc: DEFCPLBNDSTRC,
+    };
     // A channel that leaves coupling (block switched) keeps the coupling
     // range's bandwidth.
     let bwcod = ((((cpl.end() as i32) - 37) / 3) - 12).clamp(0, 60) as u8;
-    Tuning { bwcod, cpl: Some(cpl) }
+    Tuning {
+        bwcod,
+        cpl: Some(cpl),
+    }
 }
 
 impl Encoder {
@@ -272,7 +293,11 @@ impl Encoder {
             48_000 => 0u8,
             44_100 => 1,
             32_000 => 2,
-            r => return Err(invalid(format!("sample rate {r}: AC-3 / E-AC-3 code 48000, 44100 or 32000 here"))),
+            r => {
+                return Err(invalid(format!(
+                    "sample rate {r}: AC-3 / E-AC-3 code 48000, 44100 or 32000 here"
+                )));
+            }
         };
         if cfg.bsmod > 7 {
             return Err(invalid("bsmod is a 3-bit code"));
@@ -289,12 +314,30 @@ impl Encoder {
                 if cfg.layout == Layout::ThreeFour {
                     return Err(invalid("3/4 (7.1) needs E-AC-3 dependent substreams"));
                 }
-                let Some(idx) = BITRATE_KBPS.iter().position(|&r| u32::from(r) == cfg.bitrate_kbps) else {
-                    return Err(invalid(format!("{} kbit/s is not an AC-3 bit rate (Table 5.18)", cfg.bitrate_kbps)));
+                let Some(idx) = BITRATE_KBPS
+                    .iter()
+                    .position(|&r| u32::from(r) == cfg.bitrate_kbps)
+                else {
+                    return Err(invalid(format!(
+                        "{} kbit/s is not an AC-3 bit rate (Table 5.18)",
+                        cfg.bitrate_kbps
+                    )));
                 };
                 numblks = 6;
                 let acmod = cfg.layout.acmod();
-                subs.push(make_sub(&cfg, fscod, acmod, cfg.lfe, cfg.bitrate_kbps, 6, 0, None, (idx * 2) as u8, &speakers, None)?);
+                subs.push(make_sub(
+                    &cfg,
+                    fscod,
+                    acmod,
+                    cfg.lfe,
+                    cfg.bitrate_kbps,
+                    6,
+                    0,
+                    None,
+                    (idx * 2) as u8,
+                    &speakers,
+                    None,
+                )?);
             }
             Format::Eac3 => {
                 if !(32..=6144).contains(&cfg.bitrate_kbps) {
@@ -313,15 +356,37 @@ impl Encoder {
                 };
                 // The most blocks per frame that keeps every frame within
                 // 2048 words.
-                let words = |kbps: f32, nb: usize| kbps * 1000.0 * (nb * 256) as f32 / (fs as f32 * 16.0);
-                let Some(nb) = [6usize, 3, 2, 1].into_iter().find(|&nb| split.iter().all(|s| words(s.2, nb).ceil() <= 2048.0))
+                let words =
+                    |kbps: f32, nb: usize| kbps * 1000.0 * (nb * 256) as f32 / (fs as f32 * 16.0);
+                let Some(nb) = [6usize, 3, 2, 1]
+                    .into_iter()
+                    .find(|&nb| split.iter().all(|s| words(s.2, nb).ceil() <= 2048.0))
                 else {
-                    return Err(invalid(format!("{} kbit/s does not fit E-AC-3 frames at {fs} Hz", cfg.bitrate_kbps)));
+                    return Err(invalid(format!(
+                        "{} kbit/s does not fit E-AC-3 frames at {fs} Hz",
+                        cfg.bitrate_kbps
+                    )));
                 };
                 numblks = nb;
                 for (i, &(acmod, lfe, kbps)) in split.iter().enumerate() {
-                    let (strmtyp, chanmap) = if i == 0 { (0, None) } else { (1, Some(SEVEN_ONE_CHANMAP)) };
-                    subs.push(make_sub(&cfg, fscod, acmod, lfe, kbps.round() as u32, nb, strmtyp, chanmap, 0, &speakers, Some(i))?);
+                    let (strmtyp, chanmap) = if i == 0 {
+                        (0, None)
+                    } else {
+                        (1, Some(SEVEN_ONE_CHANMAP))
+                    };
+                    subs.push(make_sub(
+                        &cfg,
+                        fscod,
+                        acmod,
+                        lfe,
+                        kbps.round() as u32,
+                        nb,
+                        strmtyp,
+                        chanmap,
+                        0,
+                        &speakers,
+                        Some(i),
+                    )?);
                 }
             }
         }
@@ -349,7 +414,10 @@ impl Encoder {
                 .collect();
             let words = (sub.num / sub.den) as usize;
             if let Err(e) = probe.encode_frame(&pcm, words) {
-                return Err(invalid(format!("{} kbit/s is too low for this layout: {e}", cfg.bitrate_kbps)));
+                return Err(invalid(format!(
+                    "{} kbit/s is too low for this layout: {e}",
+                    cfg.bitrate_kbps
+                )));
             }
         }
         Ok(Self {
@@ -386,7 +454,11 @@ impl Encoder {
     /// Append interleaved samples and return every syncframe now complete.
     pub fn encode(&mut self, pcm: &[f32]) -> Result<Vec<Vec<u8>>, Error> {
         if !pcm.len().is_multiple_of(self.channels) {
-            return Err(invalid(format!("{} samples is not a whole number of {}-channel frames", pcm.len(), self.channels)));
+            return Err(invalid(format!(
+                "{} samples is not a whole number of {}-channel frames",
+                pcm.len(),
+                self.channels
+            )));
         }
         for (i, &v) in pcm.iter().enumerate() {
             self.buf[i % self.channels].push(v);
@@ -419,7 +491,9 @@ impl Encoder {
                     .mix
                     .iter()
                     .map(|terms| {
-                        (0..fl).map(|i| terms.iter().map(|&(s, g)| g * self.buf[s][i]).sum()).collect()
+                        (0..fl)
+                            .map(|i| terms.iter().map(|&(s, g)| g * self.buf[s][i]).sum())
+                            .collect()
                     })
                     .collect();
                 let words = sub.next_words();
@@ -460,18 +534,30 @@ fn make_sub(
 ) -> Result<Sub, Error> {
     use Speaker::{BL, BR, SL, SR};
     let nf = crate::decoder::nfchans_for(acmod);
-    let input = |spk: Speaker| speakers.iter().position(|&s| s == spk).expect("speaker in layout");
+    let input = |spk: Speaker| {
+        speakers
+            .iter()
+            .position(|&s| s == spk)
+            .expect("speaker in layout")
+    };
     let seven_one = cfg.layout == Layout::ThreeFour;
     let mix: Vec<Vec<(usize, f32)>> = if seven_one && sub_index == Some(1) {
         // The dependent substream, in the order of its chanmap's set bits:
         // Ls, Rs (replacing substream 0's downmixed surrounds), Lrs/Rrs.
-        [SL, SR, BL, BR].into_iter().map(|s| vec![(input(s), 1.0)]).collect()
+        [SL, SR, BL, BR]
+            .into_iter()
+            .map(|s| vec![(input(s), 1.0)])
+            .collect()
     } else {
         // Input slots of the coded channels: the decoder's output order maps
         // output slot → coded channel; invert it over this substream's
         // speakers.
         let order = crate::decoder::output_order(acmod, lfe);
-        let sub_speakers = if seven_one { Layout::ThreeTwo.speakers(lfe) } else { speakers.to_vec() };
+        let sub_speakers = if seven_one {
+            Layout::ThreeTwo.speakers(lfe)
+        } else {
+            speakers.to_vec()
+        };
         let mut mix = vec![Vec::new(); nf + usize::from(lfe)];
         for (out_slot, &coded) in order.iter().enumerate() {
             let spk = sub_speakers[out_slot];
@@ -479,8 +565,12 @@ fn make_sub(
             mix[idx] = match spk {
                 // §E.2.8.2: substream 0 of a 7.1 programme is its 5.1
                 // downmix — the back surrounds folded into the surrounds.
-                SL if seven_one => vec![(input(SL), SURROUND_DOWNMIX), (input(BL), SURROUND_DOWNMIX)],
-                SR if seven_one => vec![(input(SR), SURROUND_DOWNMIX), (input(BR), SURROUND_DOWNMIX)],
+                SL if seven_one => {
+                    vec![(input(SL), SURROUND_DOWNMIX), (input(BL), SURROUND_DOWNMIX)]
+                }
+                SR if seven_one => {
+                    vec![(input(SR), SURROUND_DOWNMIX), (input(BR), SURROUND_DOWNMIX)]
+                }
                 _ => vec![(input(spk), 1.0)],
             };
         }

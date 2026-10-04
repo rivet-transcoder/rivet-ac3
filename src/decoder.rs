@@ -16,9 +16,9 @@ use super::bitalloc::{BaParams, DeltaBa, Kind, compute_bap, fast_gain, snr_offse
 use super::bits::BitReader;
 use super::imdct::imdct_block;
 use super::tables::{
-    ASYM_MANT_BITS, BITRATE_KBPS, DEFCPLBNDSTRC, DEFSPXBNDSTRC, FRMEXPSTR, FRMSIZETAB,
-    GAQ_REMAP_A, GAQ_REMAP_B, HEBAP_MANT_BITS, SPXATTENTAB, SPXBANDTABLE, SYM_QUANT_3,
-    SYM_QUANT_5, SYM_QUANT_7, SYM_QUANT_11, SYM_QUANT_15, vq_table,
+    ASYM_MANT_BITS, BITRATE_KBPS, DEFCPLBNDSTRC, DEFSPXBNDSTRC, FRMEXPSTR, FRMSIZETAB, GAQ_REMAP_A,
+    GAQ_REMAP_B, HEBAP_MANT_BITS, SPXATTENTAB, SPXBANDTABLE, SYM_QUANT_3, SYM_QUANT_5, SYM_QUANT_7,
+    SYM_QUANT_11, SYM_QUANT_15, vq_table,
 };
 use crate::Error;
 
@@ -118,7 +118,10 @@ pub fn parse_header(data: &[u8]) -> Result<Header, Error> {
         return Err(err("ac3: frame shorter than the 8-byte sync header"));
     }
     if data[0] != 0x0b || data[1] != 0x77 {
-        return Err(err(format!("ac3: missing 0x0B77 syncword (got {:02x}{:02x})", data[0], data[1])));
+        return Err(err(format!(
+            "ac3: missing 0x0B77 syncword (got {:02x}{:02x})",
+            data[0], data[1]
+        )));
     }
     let bsid = data[5] >> 3;
     if bsid <= 8 {
@@ -169,7 +172,11 @@ pub fn parse_header(data: &[u8]) -> Result<Header, Error> {
         let substreamid = br.read(3)? as u8;
         let frmsiz = br.read(11)? as usize;
         let fscod = br.read(2)? as u8;
-        let (fscod2, numblkscod) = if fscod == 3 { (br.read(2)? as u8, 3u8) } else { (0, br.read(2)? as u8) };
+        let (fscod2, numblkscod) = if fscod == 3 {
+            (br.read(2)? as u8, 3u8)
+        } else {
+            (0, br.read(2)? as u8)
+        };
         if fscod == 3 && fscod2 == 3 {
             return Err(err("eac3: reserved fscod2 3"));
         }
@@ -181,7 +188,8 @@ pub fn parse_header(data: &[u8]) -> Result<Header, Error> {
         let frame_len = (frmsiz + 1) * 2;
         let sample_rate = sample_rate_for(fscod, fscod2);
         let samples = numblks * NB;
-        let bitrate_kbps = ((frame_len as u64 * 8 * u64::from(sample_rate)) / (samples as u64 * 1000)) as u32;
+        let bitrate_kbps =
+            ((frame_len as u64 * 8 * u64::from(sample_rate)) / (samples as u64 * 1000)) as u32;
         Ok(Header {
             eac3: true,
             strmtyp,
@@ -566,7 +574,11 @@ impl FrameDecoder {
     pub fn decode(&mut self, data: &[u8], out: &mut Vec<f32>) -> Result<Option<Header>, Error> {
         let hdr = parse_header(data)?;
         if data.len() < hdr.frame_len {
-            return Err(err(format!("ac3: frame needs {} bytes, got {}", hdr.frame_len, data.len())));
+            return Err(err(format!(
+                "ac3: frame needs {} bytes, got {}",
+                hdr.frame_len,
+                data.len()
+            )));
         }
         if hdr.eac3 && (hdr.strmtyp == 1 || hdr.substreamid != 0) && !self.all_substreams {
             #[cfg(feature = "tracing")]
@@ -578,7 +590,9 @@ impl FrameDecoder {
             return Ok(None);
         }
         if let Some(prev) = self.last
-            && (prev.acmod != hdr.acmod || prev.lfeon != hdr.lfeon || prev.sample_rate != hdr.sample_rate)
+            && (prev.acmod != hdr.acmod
+                || prev.lfeon != hdr.lfeon
+                || prev.sample_rate != hdr.sample_rate)
         {
             self.reset();
         }
@@ -595,7 +609,10 @@ impl FrameDecoder {
         let mut f = Frame::new(hdr);
         for c in &mut self.chans {
             let keep_first = Chan::default();
-            *c = Chan { aht: c.aht.take(), ..keep_first };
+            *c = Chan {
+                aht: c.aht.take(),
+                ..keep_first
+            };
         }
         if hdr.eac3 {
             parse_eac3_bsi(&mut br, &hdr)?;
@@ -611,7 +628,11 @@ impl FrameDecoder {
         for blk in 0..hdr.numblks {
             self.decode_block(&mut br, &mut f, blk)?;
             for (slot, &ch) in order.iter().enumerate() {
-                let blksw = if ch == LFE { false } else { self.chans[ch].blksw };
+                let blksw = if ch == LFE {
+                    false
+                } else {
+                    self.chans[ch].blksw
+                };
                 let coeffs = self.chans[ch].coeffs;
                 imdct_block(&coeffs, blksw, &mut self.delay[ch], &mut pcm);
                 let base = start + blk * NB * nch;
@@ -630,7 +651,11 @@ impl FrameDecoder {
     fn parse_audfrm(&mut self, br: &mut BitReader, f: &mut Frame) -> Result<(), Error> {
         let hdr = f.hdr;
         let nb = hdr.numblks;
-        let (expstre, ahte) = if nb == 6 { (br.read_bit()?, br.read_bit()?) } else { (true, false) };
+        let (expstre, ahte) = if nb == 6 {
+            (br.read_bit()?, br.read_bit()?)
+        } else {
+            (true, false)
+        };
         f.ahte = ahte;
         self.feat.frmexpstr_frames += u64::from(!expstre);
         f.snroffststr = br.read(2)? as u8;
@@ -651,7 +676,11 @@ impl FrameDecoder {
             f.cplinu_blk[0] = br.read_bit()?;
             for blk in 1..nb {
                 f.cplstre[blk] = br.read_bit()?;
-                f.cplinu_blk[blk] = if f.cplstre[blk] { br.read_bit()? } else { f.cplinu_blk[blk - 1] };
+                f.cplinu_blk[blk] = if f.cplstre[blk] {
+                    br.read_bit()?
+                } else {
+                    f.cplinu_blk[blk - 1]
+                };
             }
         }
         // exponent strategies
@@ -698,14 +727,28 @@ impl FrameDecoder {
             let ncplregs = (0..6)
                 .filter(|&blk| f.cplstre[blk] || f.cplexpstr_blk[blk] != REUSE)
                 .count();
-            f.cplahtinu = if ncplblks == 6 && ncplregs == 1 { i8::from(br.read_bit()?) } else { 0 };
+            f.cplahtinu = if ncplblks == 6 && ncplregs == 1 {
+                i8::from(br.read_bit()?)
+            } else {
+                0
+            };
             for ch in 0..hdr.nfchans {
-                let nchregs = (0..6).filter(|&blk| f.chexpstr_blk[blk][ch] != REUSE).count();
-                self.chans[ch].ahtinu = if nchregs == 1 { i8::from(br.read_bit()?) } else { 0 };
+                let nchregs = (0..6)
+                    .filter(|&blk| f.chexpstr_blk[blk][ch] != REUSE)
+                    .count();
+                self.chans[ch].ahtinu = if nchregs == 1 {
+                    i8::from(br.read_bit()?)
+                } else {
+                    0
+                };
             }
             if hdr.lfeon {
                 let nlferegs = (0..6).filter(|&blk| f.lfeexpstr_blk[blk] != REUSE).count();
-                f.lfeahtinu = if nlferegs == 1 { i8::from(br.read_bit()?) } else { 0 };
+                f.lfeahtinu = if nlferegs == 1 {
+                    i8::from(br.read_bit()?)
+                } else {
+                    0
+                };
             }
         }
         self.chans[CPL].ahtinu = f.cplahtinu;
@@ -744,9 +787,26 @@ impl FrameDecoder {
         }
         #[cfg(feature = "tracing")]
         if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!("audfrm: {:?} expstre {} ahte {} snroffststr {} blkswe {} dithflage {} bamode {} frmfgaincode {} dbaflde {} skipflde {} cplstre {:?} cplinu {:?} cplexpstr {:?} chexpstr {:?} frmcsnr {} frmfsnr {} pos {}",
-                hdr, expstre, ahte, f.snroffststr, f.blkswe, f.dithflage, f.bamode, f.frmfgaincode, f.dbaflde, f.skipflde,
-                &f.cplstre[..nb], &f.cplinu_blk[..nb], &f.cplexpstr_blk[..nb], &f.chexpstr_blk[..nb], f.frmcsnroffst, f.frmfsnroffst, br.pos());
+            tracing::trace!(
+                "audfrm: {:?} expstre {} ahte {} snroffststr {} blkswe {} dithflage {} bamode {} frmfgaincode {} dbaflde {} skipflde {} cplstre {:?} cplinu {:?} cplexpstr {:?} chexpstr {:?} frmcsnr {} frmfsnr {} pos {}",
+                hdr,
+                expstre,
+                ahte,
+                f.snroffststr,
+                f.blkswe,
+                f.dithflage,
+                f.bamode,
+                f.frmfgaincode,
+                f.dbaflde,
+                f.skipflde,
+                &f.cplstre[..nb],
+                &f.cplinu_blk[..nb],
+                &f.cplexpstr_blk[..nb],
+                &f.chexpstr_blk[..nb],
+                f.frmcsnroffst,
+                f.frmfsnroffst,
+                br.pos()
+            );
         }
         // syntax state initialisation
         for ch in 0..hdr.nfchans {
@@ -814,9 +874,15 @@ impl FrameDecoder {
                     let spxendf = br.read(3)? as usize;
                     let b = f.spxbegf as usize;
                     f.spx_begin_subbnd = if b < 6 { b + 2 } else { b * 2 - 3 };
-                    f.spx_end_subbnd = if spxendf < 3 { spxendf + 5 } else { spxendf * 2 + 3 };
+                    f.spx_end_subbnd = if spxendf < 3 {
+                        spxendf + 5
+                    } else {
+                        spxendf * 2 + 3
+                    };
                     if f.spx_begin_subbnd >= f.spx_end_subbnd {
-                        return Err(err("eac3: spectral extension begin sub-band ≥ end sub-band"));
+                        return Err(err(
+                            "eac3: spectral extension begin sub-band ≥ end sub-band",
+                        ));
                     }
                     if br.read_bit()? {
                         for bnd in f.spx_begin_subbnd + 1..f.spx_end_subbnd {
@@ -857,7 +923,11 @@ impl FrameDecoder {
                             for bnd in 0..f.nspxbnds {
                                 let exp = br.read(4)?;
                                 let mant = br.read(2)? as f32;
-                                let temp = if exp == 15 { mant / 4.0 } else { (mant + 4.0) / 8.0 };
+                                let temp = if exp == 15 {
+                                    mant / 4.0
+                                } else {
+                                    (mant + 4.0) / 8.0
+                                };
                                 c.spxco[bnd] = temp / (1u64 << (exp + 3 * mstrspxco)) as f32;
                             }
                             // §3.6.4.2.1 blending factors, computed when new
@@ -867,7 +937,9 @@ impl FrameDecoder {
                             let end = f32::from(SPXBANDTABLE[f.spx_end_subbnd]);
                             for bnd in 0..f.nspxbnds {
                                 let bandsize = f.spxbndsz[bnd];
-                                let nratio = ((spxmant as f32 + 0.5 * bandsize as f32) / end - noffset).clamp(0.0, 1.0);
+                                let nratio = ((spxmant as f32 + 0.5 * bandsize as f32) / end
+                                    - noffset)
+                                    .clamp(0.0, 1.0);
                                 c.nblend[bnd] = nratio.sqrt();
                                 c.sblend[bnd] = (1.0 - nratio).sqrt();
                                 spxmant += bandsize;
@@ -887,7 +959,11 @@ impl FrameDecoder {
             f.cplinu = f.cplinu_blk[blk];
         }
         if cplstre {
-            f.cplinu = if eac3 { f.cplinu_blk[blk] } else { br.read_bit()? };
+            f.cplinu = if eac3 {
+                f.cplinu_blk[blk]
+            } else {
+                br.read_bit()?
+            };
             if f.cplinu {
                 if eac3 && br.read_bit()? {
                     return Err(Error::Unsupported(
@@ -934,7 +1010,10 @@ impl FrameDecoder {
                     }
                 }
                 f.ncplbnd = f.ncplsubnd
-                    - f.cplbndstrc[b0 + 1..b0 + f.ncplsubnd].iter().map(|&b| usize::from(b)).sum::<usize>();
+                    - f.cplbndstrc[b0 + 1..b0 + f.ncplsubnd]
+                        .iter()
+                        .map(|&b| usize::from(b))
+                        .sum::<usize>();
             } else {
                 for ch in 0..nf {
                     self.chans[ch].incpl = false;
@@ -967,7 +1046,11 @@ impl FrameDecoder {
                         for bnd in 0..f.ncplbnd {
                             let exp = br.read(4)?;
                             let mant = br.read(4)? as f32;
-                            let temp = if exp == 15 { mant / 16.0 } else { (mant + 16.0) / 32.0 };
+                            let temp = if exp == 15 {
+                                mant / 16.0
+                            } else {
+                                (mant + 16.0) / 32.0
+                            };
                             c.cplco_band[bnd] = temp / (1u64 << (exp + 3 * mstrcplco)) as f32;
                         }
                     }
@@ -983,7 +1066,11 @@ impl FrameDecoder {
         }
         // --- rematrixing ------------------------------------------------------
         if hdr.acmod == 2 {
-            let rematstr = if eac3 && blk == 0 { true } else { br.read_bit()? };
+            let rematstr = if eac3 && blk == 0 {
+                true
+            } else {
+                br.read_bit()?
+            };
             if rematstr {
                 f.nrematbd = if f.cplinu {
                     match f.cplbegf {
@@ -1041,12 +1128,24 @@ impl FrameDecoder {
         self.chans[LFE].endmant = 7;
         #[cfg(feature = "tracing")]
         if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!("blk {blk} blksw {:?} dith {:?} pos {} cplinu {} cplbegf {} cplendf {} ncplsubnd {} ncplbnd {} phsflginu {} expstr {:?} bwcod {:?} endmant {:?} incpl {:?} rematflg {:?} nrematbd {}",
-                (0..nf).map(|c| self.chans[c].blksw).collect::<Vec<_>>(), (0..nf).map(|c| self.chans[c].dith).collect::<Vec<_>>(), br.pos(), f.cplinu, f.cplbegf, f.cplendf, f.ncplsubnd, f.ncplbnd, f.phsflginu,
+            tracing::trace!(
+                "blk {blk} blksw {:?} dith {:?} pos {} cplinu {} cplbegf {} cplendf {} ncplsubnd {} ncplbnd {} phsflginu {} expstr {:?} bwcod {:?} endmant {:?} incpl {:?} rematflg {:?} nrematbd {}",
+                (0..nf).map(|c| self.chans[c].blksw).collect::<Vec<_>>(),
+                (0..nf).map(|c| self.chans[c].dith).collect::<Vec<_>>(),
+                br.pos(),
+                f.cplinu,
+                f.cplbegf,
+                f.cplendf,
+                f.ncplsubnd,
+                f.ncplbnd,
+                f.phsflginu,
                 (0..nf).map(|c| self.chans[c].expstr).collect::<Vec<_>>(),
                 (0..nf).map(|c| self.chans[c].bwcod).collect::<Vec<_>>(),
                 (0..nf).map(|c| self.chans[c].endmant).collect::<Vec<_>>(),
-                (0..nf).map(|c| self.chans[c].incpl).collect::<Vec<_>>(), f.rematflg, f.nrematbd);
+                (0..nf).map(|c| self.chans[c].incpl).collect::<Vec<_>>(),
+                f.rematflg,
+                f.nrematbd
+            );
         }
         // --- exponents --------------------------------------------------------
         if f.cplinu && self.chans[CPL].expstr != REUSE {
@@ -1056,7 +1155,8 @@ impl FrameDecoder {
             let mut tmp = [0u8; 280];
             decode_exponents(br, ncplgrps, grpsize, absexp, &mut tmp)?;
             let c = &mut self.chans[CPL];
-            c.exps[f.cplstrtmant..f.cplendmant].copy_from_slice(&tmp[1..=f.cplendmant - f.cplstrtmant]);
+            c.exps[f.cplstrtmant..f.cplendmant]
+                .copy_from_slice(&tmp[1..=f.cplendmant - f.cplstrtmant]);
         }
         for ch in 0..nf {
             let c = &mut self.chans[ch];
@@ -1096,7 +1196,11 @@ impl FrameDecoder {
                 c.fsnroffst = f.frmfsnroffst;
             }
         } else {
-            let snroffste = if eac3 && blk == 0 { true } else { br.read_bit()? };
+            let snroffste = if eac3 && blk == 0 {
+                true
+            } else {
+                br.read_bit()?
+            };
             if snroffste {
                 f.csnroffst = br.read(6)? as u8;
                 if eac3 && f.snroffststr == 1 {
@@ -1130,7 +1234,11 @@ impl FrameDecoder {
         }
         // --- fast gain codes (E-AC-3) ----------------------------------------
         if eac3 {
-            let fgaincode = if f.frmfgaincode { br.read_bit()? } else { false };
+            let fgaincode = if f.frmfgaincode {
+                br.read_bit()?
+            } else {
+                false
+            };
             if fgaincode {
                 if f.cplinu {
                     self.chans[CPL].fgaincod = br.read(3)? as u8;
@@ -1203,17 +1311,33 @@ impl FrameDecoder {
         self.run_bit_allocation(f);
         #[cfg(feature = "tracing")]
         if tracing::enabled!(tracing::Level::TRACE) {
-            tracing::trace!("ba: csnr {} fsnr {:?} fgain {:?} sd/fd/sg/db/fl {:?} nzbap {:?} bap1 {:?} exps0..8 {:?} aht {:?} lfe exps {:?} bap {:?}",
+            tracing::trace!(
+                "ba: csnr {} fsnr {:?} fgain {:?} sd/fd/sg/db/fl {:?} nzbap {:?} bap1 {:?} exps0..8 {:?} aht {:?} lfe exps {:?} bap {:?}",
                 f.csnroffst,
-                (0..NCH).map(|c| self.chans[c].fsnroffst).collect::<Vec<_>>(),
+                (0..NCH)
+                    .map(|c| self.chans[c].fsnroffst)
+                    .collect::<Vec<_>>(),
                 (0..NCH).map(|c| self.chans[c].fgaincod).collect::<Vec<_>>(),
                 f.ba,
-                (0..nf).map(|c| self.chans[c].bap[..self.chans[c].endmant].iter().filter(|&&b| b != 0).count()).collect::<Vec<_>>(),
-                (0..nf).map(|c| self.chans[c].bap[..self.chans[c].endmant].iter().filter(|&&b| b == 1).count()).collect::<Vec<_>>(),
-                (0..nf).map(|c| self.chans[c].exps[30..42].to_vec()).collect::<Vec<_>>(),
+                (0..nf)
+                    .map(|c| self.chans[c].bap[..self.chans[c].endmant]
+                        .iter()
+                        .filter(|&&b| b != 0)
+                        .count())
+                    .collect::<Vec<_>>(),
+                (0..nf)
+                    .map(|c| self.chans[c].bap[..self.chans[c].endmant]
+                        .iter()
+                        .filter(|&&b| b == 1)
+                        .count())
+                    .collect::<Vec<_>>(),
+                (0..nf)
+                    .map(|c| self.chans[c].exps[30..42].to_vec())
+                    .collect::<Vec<_>>(),
                 (0..NCH).map(|c| self.chans[c].ahtinu).collect::<Vec<_>>(),
                 &self.chans[LFE].exps[..7],
-                &self.chans[LFE].bap[..7]);
+                &self.chans[LFE].bap[..7]
+            );
         }
         // --- mantissas --------------------------------------------------------
         self.block_bits[blk].0 = br.pos();
@@ -1235,7 +1359,14 @@ impl FrameDecoder {
             }
             if f.cplinu && self.chans[ch].incpl && !got_cplchan {
                 match self.chans[CPL].ahtinu {
-                    0 => self.read_mantissas(br, &mut groups, CPL, f.cplstrtmant, f.cplendmant, false)?,
+                    0 => self.read_mantissas(
+                        br,
+                        &mut groups,
+                        CPL,
+                        f.cplstrtmant,
+                        f.cplendmant,
+                        false,
+                    )?,
                     1 => {
                         self.read_aht_mantissas(br, CPL, f.cplstrtmant, f.cplendmant)?;
                         self.chans[CPL].ahtinu = -1;
@@ -1287,7 +1418,11 @@ impl FrameDecoder {
                     let base = (usize::from(f.cplbegf) + sb) * 12 + 37;
                     for bin in base..base + 12 {
                         let v = if self.chans[CPL].bap[bin] == 0 && self.chans[CPL].ahtinu == 0 {
-                            if dith { self.rand() * 0.707 * exp_scale(self.chans[CPL].exps[bin]) } else { 0.0 }
+                            if dith {
+                                self.rand() * 0.707 * exp_scale(self.chans[CPL].exps[bin])
+                            } else {
+                                0.0
+                            }
                         } else {
                             self.chans[CPL].coeffs[bin]
                         };
@@ -1330,7 +1465,11 @@ impl FrameDecoder {
         }
         if self.drc_scale > 0.0 {
             let g1 = dynrng_gain(f.dynrng).powf(self.drc_scale);
-            let g2 = if hdr.acmod == 0 { dynrng_gain(f.dynrng2).powf(self.drc_scale) } else { g1 };
+            let g2 = if hdr.acmod == 0 {
+                dynrng_gain(f.dynrng2).powf(self.drc_scale)
+            } else {
+                g1
+            };
             for ch in 0..nf {
                 let g = if hdr.acmod == 0 && ch == 1 { g2 } else { g1 };
                 if g != 1.0 {
@@ -1381,7 +1520,11 @@ impl FrameDecoder {
                 LFE => Kind::Lfe,
                 _ => Kind::Fbw,
             };
-            let delta = if ch != LFE && c.deltbae != 2 && c.delta.nseg > 0 { Some(&c.delta) } else { None };
+            let delta = if ch != LFE && c.deltbae != 2 && c.delta.nseg > 0 {
+                Some(&c.delta)
+            } else {
+                None
+            };
             let mut bap = [0u8; NB];
             compute_bap(
                 &c.exps,
@@ -1428,7 +1571,11 @@ impl FrameDecoder {
                 1 => {
                     if g.b1.0 == 0 {
                         let code = br.read(5)?;
-                        g.b1.1 = [(code / 9).min(2) as u8, ((code % 9) / 3) as u8, (code % 3) as u8];
+                        g.b1.1 = [
+                            (code / 9).min(2) as u8,
+                            ((code % 9) / 3) as u8,
+                            (code % 3) as u8,
+                        ];
                         g.b1.0 = 3;
                     }
                     let v = g.b1.1[3 - g.b1.0 as usize];
@@ -1438,7 +1585,11 @@ impl FrameDecoder {
                 2 => {
                     if g.b2.0 == 0 {
                         let code = br.read(7)?;
-                        g.b2.1 = [(code / 25).min(4) as u8, ((code % 25) / 5) as u8, (code % 5) as u8];
+                        g.b2.1 = [
+                            (code / 25).min(4) as u8,
+                            ((code % 25) / 5) as u8,
+                            (code % 5) as u8,
+                        ];
                         g.b2.0 = 3;
                     }
                     let v = g.b2.1[3 - g.b2.0 as usize];
@@ -1472,7 +1623,13 @@ impl FrameDecoder {
     /// invert the DCT (§3.4.5) into `Chan::aht[blk][bin]`.
     // Loops mirror the spec's pseudo-code index for index.
     #[allow(clippy::needless_range_loop)]
-    fn read_aht_mantissas(&mut self, br: &mut BitReader, ch: usize, start: usize, end: usize) -> Result<(), Error> {
+    fn read_aht_mantissas(
+        &mut self,
+        br: &mut BitReader,
+        ch: usize,
+        start: usize,
+        end: usize,
+    ) -> Result<(), Error> {
         let gaqmod = br.read(2)? as u8;
         self.feat.aht_channels += 1;
         self.feat.gaq_channels += u64::from(gaqmod != 0);
@@ -1537,7 +1694,11 @@ impl FrameDecoder {
                     self.feat.gaq_bins += 1;
                     let m = u32::from(HEBAP_MANT_BITS[hebap as usize]);
                     let row = (hebap - 8) as usize;
-                    let lg = if gaqbin[bin] == 1 { u32::from(log_gain[bin]) } else { 0 };
+                    let lg = if gaqbin[bin] == 1 {
+                        u32::from(log_gain[bin])
+                    } else {
+                        0
+                    };
                     let gbits = m - lg;
                     for n in 0..6 {
                         let v = br.read_signed(gbits)?;
@@ -1547,7 +1708,8 @@ impl FrameDecoder {
                             let lbits = if lg == 1 { m - 1 } else { m };
                             let x = br.read_signed(lbits)? as f32 / (1u32 << (lbits - 1)) as f32;
                             let a = f32::from(GAQ_REMAP_A[row][lg as usize]) / 32768.0;
-                            let b = f32::from(GAQ_REMAP_B[row][lg as usize][usize::from(x < 0.0)]) / 32768.0;
+                            let b = f32::from(GAQ_REMAP_B[row][lg as usize][usize::from(x < 0.0)])
+                                / 32768.0;
                             x + a * x + b
                         } else if lg > 0 {
                             // small mantissa: attenuated by 1/Gk, no remap
@@ -1563,9 +1725,14 @@ impl FrameDecoder {
         }
         #[cfg(feature = "tracing")]
         if tracing::enabled!(tracing::Level::TRACE) && ch == LFE {
-            tracing::trace!("aht lfe: gaqmod {gaqmod} hebap {:?} gains {:?} pre[blk][bin] {:?}",
-                &self.chans[ch].bap[start..end], gains,
-                (0..6).map(|j| pre[j][start..end].to_vec()).collect::<Vec<_>>());
+            tracing::trace!(
+                "aht lfe: gaqmod {gaqmod} hebap {:?} gains {:?} pre[blk][bin] {:?}",
+                &self.chans[ch].bap[start..end],
+                gains,
+                (0..6)
+                    .map(|j| pre[j][start..end].to_vec())
+                    .collect::<Vec<_>>()
+            );
         }
         // §3.4.5 inverse DCT across the six blocks
         let mut out = Box::new([[0.0f32; NB]; 6]);
@@ -1589,7 +1756,9 @@ impl FrameDecoder {
     /// into `coeffs`, with §7.3.4 dither for zero-bit bins.
     fn apply_aht_block(&mut self, ch: usize, blk: usize, start: usize, end: usize, dither: bool) {
         let dith = dither && self.chans[ch].dith && self.noise_fill;
-        let Some(aht) = self.chans[ch].aht.take() else { return };
+        let Some(aht) = self.chans[ch].aht.take() else {
+            return;
+        };
         for bin in start..end {
             let m = if self.chans[ch].bap[bin] == 0 {
                 if dith { self.rand() * 0.707 } else { 0.0 }
@@ -1674,7 +1843,11 @@ impl FrameDecoder {
             for bin in spxmant..spxmant + bandsize {
                 // zero-mean, unit variance; the diagnostic switch that turns
                 // off the §7.3.4 dither turns this off too.
-                let noise = if self.noise_fill { self.rand() * sqrt3 } else { 0.0 };
+                let noise = if self.noise_fill {
+                    self.rand() * sqrt3
+                } else {
+                    0.0
+                };
                 let tc = &mut self.chans[ch].coeffs;
                 tc[bin] = (tc[bin] * sscale + noise * nscale) * co;
             }
@@ -1751,7 +1924,13 @@ fn exp_scale(exp: u8) -> f32 {
 
 /// §7.1.3: decode `ngrps` 7-bit grouped values into absolute exponents.
 /// `out[0] = absexp`, `out[1..=ngrps*3*grpsize]` follow.
-fn decode_exponents(br: &mut BitReader, ngrps: usize, grpsize: usize, absexp: u8, out: &mut [u8]) -> Result<(), Error> {
+fn decode_exponents(
+    br: &mut BitReader,
+    ngrps: usize,
+    grpsize: usize,
+    absexp: u8,
+    out: &mut [u8],
+) -> Result<(), Error> {
     out[0] = absexp;
     let mut prev = i32::from(absexp);
     let mut i = 1usize;
@@ -1800,7 +1979,13 @@ pub(crate) fn output_order(acmod: u8, lfeon: bool) -> Vec<usize> {
     if lfeon {
         v.push(LFE);
     }
-    let fronts = if acmod == 1 { 1 } else if acmod & 1 == 1 { 3 } else { 2 };
+    let fronts = if acmod == 1 {
+        1
+    } else if acmod & 1 == 1 {
+        3
+    } else {
+        2
+    };
     v.extend(fronts..nf);
     v
 }
@@ -1809,7 +1994,10 @@ pub(crate) fn output_order(acmod: u8, lfeon: bool) -> Vec<usize> {
 /// full-bandwidth channel it carries (0 = the first in Table 5.8's order),
 /// or `None` for the LFE.
 pub(crate) fn coded_output_channels(acmod: u8, lfeon: bool) -> Vec<Option<usize>> {
-    output_order(acmod, lfeon).into_iter().map(|c| (c != LFE).then_some(c)).collect()
+    output_order(acmod, lfeon)
+        .into_iter()
+        .map(|c| (c != LFE).then_some(c))
+        .collect()
 }
 
 /// AC-3 `bsi()` (Table 5.2) after the fixed 8-byte prefix; skips everything
@@ -1978,7 +2166,11 @@ fn parse_eac3_bsi(br: &mut BitReader, hdr: &Header) -> Result<(), Error> {
         br.read(1)?; // convsync
     }
     if strmtyp == 2 {
-        let blkid = if numblkscod == 3 { true } else { br.read_bit()? };
+        let blkid = if numblkscod == 3 {
+            true
+        } else {
+            br.read_bit()?
+        };
         if blkid {
             br.read(6)?; // frmsizecod
         }
@@ -1998,7 +2190,11 @@ pub fn frame_crc_ok(frame: &[u8]) -> bool {
     for &b in frame.iter().skip(2) {
         crc ^= u16::from(b) << 8;
         for _ in 0..8 {
-            crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x8005 } else { crc << 1 };
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x8005
+            } else {
+                crc << 1
+            };
         }
     }
     crc == 0
@@ -2073,7 +2269,11 @@ mod tests {
             assert_eq!(l, speakers, "acmod {acmod} lfe {lfeon}");
             assert_eq!(l.len(), output_order(acmod, lfeon).len());
         }
-        let names: Vec<String> = h(4, true).speakers().iter().map(ToString::to_string).collect();
+        let names: Vec<String> = h(4, true)
+            .speakers()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
         assert_eq!(names.join("+"), "FL+FR+LFE+BC");
     }
 
@@ -2095,7 +2295,11 @@ mod tests {
         for &b in &payload[2..] {
             crc ^= u16::from(b) << 8;
             for _ in 0..8 {
-                crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x8005 } else { crc << 1 };
+                crc = if crc & 0x8000 != 0 {
+                    (crc << 1) ^ 0x8005
+                } else {
+                    crc << 1
+                };
             }
         }
         let mut frame = payload.to_vec();

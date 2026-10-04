@@ -46,9 +46,18 @@ fn fft(buf: &mut [C], tw: &[C]) {
                 let w = tw[k * stride];
                 let a = buf[start + k];
                 let b = buf[start + k + size / 2];
-                let t = C { re: b.re * w.re - b.im * w.im, im: b.re * w.im + b.im * w.re };
-                buf[start + k] = C { re: a.re + t.re, im: a.im + t.im };
-                buf[start + k + size / 2] = C { re: a.re - t.re, im: a.im - t.im };
+                let t = C {
+                    re: b.re * w.re - b.im * w.im,
+                    im: b.re * w.im + b.im * w.re,
+                };
+                buf[start + k] = C {
+                    re: a.re + t.re,
+                    im: a.im + t.im,
+                };
+                buf[start + k + size / 2] = C {
+                    re: a.re - t.re,
+                    im: a.im - t.im,
+                };
             }
         }
         size *= 2;
@@ -69,12 +78,19 @@ struct Plan {
 impl Plan {
     fn new(m: usize) -> Self {
         let h = m / 2;
-        let e = |a: f64| C { re: a.cos(), im: -a.sin() };
+        let e = |a: f64| C {
+            re: a.cos(),
+            im: -a.sin(),
+        };
         Self {
             m,
-            fft: (0..h / 2).map(|i| e(2.0 * PI * i as f64 / h as f64)).collect(),
+            fft: (0..h / 2)
+                .map(|i| e(2.0 * PI * i as f64 / h as f64))
+                .collect(),
             pre: (0..h).map(|n| e(PI * n as f64 / m as f64)).collect(),
-            post: (0..h).map(|k| e(PI * (k as f64 + 0.25) / m as f64)).collect(),
+            post: (0..h)
+                .map(|k| e(PI * (k as f64 + 0.25) / m as f64))
+                .collect(),
         }
     }
 
@@ -85,14 +101,23 @@ impl Plan {
         let mut z = [C::default(); 128];
         let z = &mut z[..h];
         for n in 0..h {
-            let c = C { re: v[2 * n], im: v[m - 1 - 2 * n] };
+            let c = C {
+                re: v[2 * n],
+                im: v[m - 1 - 2 * n],
+            };
             let p = self.pre[n];
-            z[n] = C { re: c.re * p.re - c.im * p.im, im: c.re * p.im + c.im * p.re };
+            z[n] = C {
+                re: c.re * p.re - c.im * p.im,
+                im: c.re * p.im + c.im * p.re,
+            };
         }
         fft(z, &self.fft);
         for k in 0..h {
             let p = self.post[k];
-            let a = C { re: z[k].re * p.re - z[k].im * p.im, im: z[k].re * p.im + z[k].im * p.re };
+            let a = C {
+                re: z[k].re * p.re - z[k].im * p.im,
+                im: z[k].re * p.im + z[k].im * p.re,
+            };
             out[2 * k] = scale * a.re;
             out[m - 1 - 2 * k] = -scale * a.im;
         }
@@ -186,8 +211,9 @@ mod tests {
                     * x.iter()
                         .enumerate()
                         .map(|(i, &xi)| {
-                            let a = 2.0 * PI / (4.0 * nf) * (2.0 * i as f64 + 1.0) * (2.0 * kf + 1.0)
-                                + PI / 4.0 * (2.0 * kf + 1.0) * (1.0 + alpha);
+                            let a =
+                                2.0 * PI / (4.0 * nf) * (2.0 * i as f64 + 1.0) * (2.0 * kf + 1.0)
+                                    + PI / 4.0 * (2.0 * kf + 1.0) * (1.0 + alpha);
                             xi * a.cos()
                         })
                         .sum::<f64>()
@@ -214,14 +240,22 @@ mod tests {
         let mut out = [0.0f64; 256];
         transform(&x, 128, long, &mut out);
         let r = reference(&x, 0.0);
-        let err = out.iter().zip(&r).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+        let err = out
+            .iter()
+            .zip(&r)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f64::max);
         assert!(err < 1e-12, "long: {err}");
         for (alpha, s) in [(-1.0, 0usize), (1.0, 128)] {
             let x = noise(256, 11 + s as u32);
             let mut out = [0.0f64; 128];
             transform(&x, s, short, &mut out);
             let r = reference(&x, alpha);
-            let err = out.iter().zip(&r).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+            let err = out
+                .iter()
+                .zip(&r)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0, f64::max);
             assert!(err < 1e-12, "short α={alpha}: {err}");
         }
     }
@@ -233,8 +267,13 @@ mod tests {
     #[test]
     fn decoder_imdct_inverts_the_forward_transform_through_block_switches() {
         let blocks = 24;
-        let sig: Vec<f32> = noise(256 * (blocks + 1), 3).iter().map(|v| *v as f32 * 0.5).collect();
-        let pattern = [false, false, true, false, true, true, false, true, false, false, true, true];
+        let sig: Vec<f32> = noise(256 * (blocks + 1), 3)
+            .iter()
+            .map(|v| *v as f32 * 0.5)
+            .collect();
+        let pattern = [
+            false, false, true, false, true, true, false, true, false, false, true, true,
+        ];
         let mut delay = [0.0f32; 256];
         let mut prev = [0.0f32; 256];
         let mut out = Vec::new();
@@ -251,7 +290,9 @@ mod tests {
             out.extend_from_slice(&pcm);
         }
         // Output block b is input block b − 1.
-        let err = (256..blocks * 256).map(|i| (out[i] - sig[i - 256]).abs()).fold(0.0f32, f32::max);
+        let err = (256..blocks * 256)
+            .map(|i| (out[i] - sig[i - 256]).abs())
+            .fold(0.0f32, f32::max);
         assert!(err < 2e-6, "max reconstruction error {err}");
     }
 }

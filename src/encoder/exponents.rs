@@ -24,7 +24,11 @@ pub(super) fn raw_exponent(x: f32) -> u8 {
     }
     let biased = (a.to_bits() >> 23) & 0xff;
     // |x| = 1.m · 2^(biased−127), so e = 126 − biased.
-    if biased == 0 { 24 } else { (126 - biased as i32).clamp(0, 24) as u8 }
+    if biased == 0 {
+        24
+    } else {
+        (126 - biased as i32).clamp(0, 24) as u8
+    }
 }
 
 /// Exponents per group for a strategy (Table 7.4 / §7.1.3).
@@ -79,7 +83,13 @@ pub(super) fn set_bits(set: Set, start: usize, end: usize, expstr: u8) -> usize 
 /// shared over `grpsize` bins take the group's minimum, then successive
 /// values are lowered until every difference is within ±2. Exponents only
 /// ever go down, so no mantissa overflows.
-pub(super) fn encode_set(want: &[u8; 256], set: Set, start: usize, end: usize, expstr: u8) -> Coded {
+pub(super) fn encode_set(
+    want: &[u8; 256],
+    set: Set,
+    start: usize,
+    end: usize,
+    expstr: u8,
+) -> Coded {
     let mut seq = [0i32; MAX_SEQ];
     let n = sequence(want, set, start, end, expstr, &mut seq);
     let mut groups = Vec::with_capacity(n / 3);
@@ -104,7 +114,14 @@ const MAX_SEQ: usize = 1 + 3 * 85;
 /// The coded exponent sequence of [`encode_set`] (`seq[0]` the absolute or
 /// reference value, then one per differential) into `seq`; returns the
 /// number of differentials.
-fn sequence(want: &[u8; 256], set: Set, start: usize, end: usize, expstr: u8, seq: &mut [i32; MAX_SEQ]) -> usize {
+fn sequence(
+    want: &[u8; 256],
+    set: Set,
+    start: usize,
+    end: usize,
+    expstr: u8,
+    seq: &mut [i32; MAX_SEQ],
+) -> usize {
     let g = grpsize(expstr);
     let ngrps = ngroups(set, start, end, expstr);
     let seq = &mut seq[..1 + 3 * ngrps];
@@ -120,7 +137,11 @@ fn sequence(want: &[u8; 256], set: Set, start: usize, end: usize, expstr: u8, se
         let lo = first_bin + (i - 1) * g;
         let hi = (lo + g).min(end);
         if lo < end {
-            last = want[lo..hi].iter().map(|&e| i32::from(e)).min().unwrap_or(24);
+            last = want[lo..hi]
+                .iter()
+                .map(|&e| i32::from(e))
+                .min()
+                .unwrap_or(24);
         }
         *s = last; // past `end`: repeat (difference 0)
     }
@@ -147,7 +168,14 @@ fn sequence(want: &[u8; 256], set: Set, start: usize, end: usize, expstr: u8, se
 
 /// The exponent of every bin `start..end` as the decoder rebuilds it from
 /// the sequence, into `exps`.
-fn rebuild(seq: &[i32; MAX_SEQ], set: Set, start: usize, end: usize, expstr: u8, exps: &mut [u8; 256]) {
+fn rebuild(
+    seq: &[i32; MAX_SEQ],
+    set: Set,
+    start: usize,
+    end: usize,
+    expstr: u8,
+    exps: &mut [u8; 256],
+) {
     let g = grpsize(expstr);
     let first_bin = match set {
         Set::Absolute => {
@@ -407,7 +435,10 @@ mod tests {
         //                           (5−3, 7−5, 9−7) = (2, 2, 2) → (4, 4, 4) → 124
         assert_eq!(c.groups, vec![15, 124]);
         let un = unpack(c.abs, &c.groups, 2);
-        assert_eq!(&un[..7], &[seq[0], seq[1], seq[1], seq[2], seq[2], seq[3], seq[3]]);
+        assert_eq!(
+            &un[..7],
+            &[seq[0], seq[1], seq[1], seq[2], seq[2], seq[3], seq[3]]
+        );
         // never above what was wanted
         assert!((0..13).all(|b| c.exps[b] <= want[b]));
     }
@@ -477,9 +508,22 @@ mod tests {
         let s = choose(&t);
         assert_ne!(s[0], REUSE);
         assert!(s[1..].iter().all(|&x| x == REUSE), "{s:?}");
-        let t2 = Track { raw: mk(vec![Some(flat), Some(flat), Some(flat), Some(loud), Some(loud), Some(loud)]), ..t };
+        let t2 = Track {
+            raw: mk(vec![
+                Some(flat),
+                Some(flat),
+                Some(flat),
+                Some(loud),
+                Some(loud),
+                Some(loud),
+            ]),
+            ..t
+        };
         let s2 = choose(&t2);
-        assert_ne!(s2[3], REUSE, "the level change must start a new set: {s2:?}");
+        assert_ne!(
+            s2[3], REUSE,
+            "the level change must start a new set: {s2:?}"
+        );
         assert!(choose_frame_row(&t2).is_some());
     }
 }

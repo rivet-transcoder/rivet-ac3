@@ -68,7 +68,11 @@ pub(super) fn fast_gain(fgaincod: u8) -> i32 {
 fn logadd(a: i32, b: i32) -> i32 {
     let c = a - b;
     let address = ((c.abs() >> 1) as usize).min(255);
-    if c >= 0 { a + i32::from(LATAB[address]) } else { b + i32::from(LATAB[address]) }
+    if c >= 0 {
+        a + i32::from(LATAB[address])
+    } else {
+        b + i32::from(LATAB[address])
+    }
 }
 
 fn calc_lowcomp(a: i32, b0: i32, b1: i32, bin: usize) -> i32 {
@@ -255,7 +259,15 @@ pub(crate) fn compute_mask(
 
 /// §7.2.2.7: bit allocation pointers for bins `start..end` from a masking
 /// curve and an SNR offset (`floor` is the `floortab` value in use).
-pub(crate) fn bap_from_mask(m: &Mask, start: usize, end: usize, floor: i32, snroffset: i32, hebap: bool, bap: &mut [u8]) {
+pub(crate) fn bap_from_mask(
+    m: &Mask,
+    start: usize,
+    end: usize,
+    floor: i32,
+    snroffset: i32,
+    hebap: bool,
+    bap: &mut [u8],
+) {
     let mut i = start;
     let mut j = MASKTAB[start] as usize;
     loop {
@@ -270,7 +282,11 @@ pub(crate) fn bap_from_mask(m: &Mask, start: usize, end: usize, floor: i32, snro
         mask += floor;
         while i < lastbin {
             let address = ((m.psd[i] - mask) >> 5).clamp(0, 63) as usize;
-            bap[i] = if hebap { HEBAPTAB[address] } else { BAPTAB[address] };
+            bap[i] = if hebap {
+                HEBAPTAB[address]
+            } else {
+                BAPTAB[address]
+            };
             i += 1;
         }
         j += 1;
@@ -299,17 +315,60 @@ mod tests {
         let mut bap = [0u8; 256];
         // Exponent 24 everywhere = the quietest possible spectrum.
         let quiet = [24u8; 256];
-        compute_bap(&quiet, 0, 253, 0, &params, fast_gain(4), snr_offset(15, 0), Kind::Fbw, None, false, &mut bap);
-        assert!(bap[..253].iter().all(|&b| b == 0), "quiet spectrum must get no bits");
+        compute_bap(
+            &quiet,
+            0,
+            253,
+            0,
+            &params,
+            fast_gain(4),
+            snr_offset(15, 0),
+            Kind::Fbw,
+            None,
+            false,
+            &mut bap,
+        );
+        assert!(
+            bap[..253].iter().all(|&b| b == 0),
+            "quiet spectrum must get no bits"
+        );
         // Exponent 0 everywhere = full-scale in every bin; a modest snroffset
         // must hand out bits.
         let loud = [0u8; 256];
-        compute_bap(&loud, 0, 253, 0, &params, fast_gain(4), snr_offset(20, 0), Kind::Fbw, None, false, &mut bap);
-        assert!(bap[..253].iter().all(|&b| b > 0), "loud spectrum must get bits: {:?}", &bap[..16]);
+        compute_bap(
+            &loud,
+            0,
+            253,
+            0,
+            &params,
+            fast_gain(4),
+            snr_offset(20, 0),
+            Kind::Fbw,
+            None,
+            false,
+            &mut bap,
+        );
+        assert!(
+            bap[..253].iter().all(|&b| b > 0),
+            "loud spectrum must get bits: {:?}",
+            &bap[..16]
+        );
         // And the hebap variant reads the other pointer table, whose entries
         // for the same address are never smaller.
         let mut hb = [0u8; 256];
-        compute_bap(&loud, 0, 253, 0, &params, fast_gain(4), snr_offset(20, 0), Kind::Fbw, None, true, &mut hb);
+        compute_bap(
+            &loud,
+            0,
+            253,
+            0,
+            &params,
+            fast_gain(4),
+            snr_offset(20, 0),
+            Kind::Fbw,
+            None,
+            true,
+            &mut hb,
+        );
         assert!(hb[..253].iter().zip(&bap[..253]).all(|(h, b)| h >= b));
     }
 
@@ -319,7 +378,16 @@ mod tests {
     #[test]
     fn hand_computed_lfe_allocation() {
         let params = BaParams::from_codes(2, 1, 1, 2, 4);
-        assert_eq!((params.sdecay, params.fdecay, params.sgain, params.dbknee, params.floor), (0x13, 0x53, 0x4d8, 0x900, 0x1f0));
+        assert_eq!(
+            (
+                params.sdecay,
+                params.fdecay,
+                params.sgain,
+                params.dbknee,
+                params.floor
+            ),
+            (0x13, 0x53, 0x4d8, 0x900, 0x1f0)
+        );
         let mut bap = [0u8; 256];
         // Exponents all 10: psd = 3072 − (10 << 7) = 1792 in every band.
         // excite[0], excite[1] = 1792 − 640 − lowcomp 0 = 1152; bin 2 starts
@@ -330,18 +398,54 @@ mod tests {
         // snroffset(15, 0) = 0: (1280 − 496) & 0x1fe0 = 768, + 496 = 1264;
         // address (1792 − 1264) >> 5 = 16 → baptab[16] = 6.
         let mut exps = [10u8; 256];
-        compute_bap(&exps, 0, 7, 0, &params, fast_gain(4), snr_offset(15, 0), Kind::Lfe, None, false, &mut bap);
+        compute_bap(
+            &exps,
+            0,
+            7,
+            0,
+            &params,
+            fast_gain(4),
+            snr_offset(15, 0),
+            Kind::Lfe,
+            None,
+            false,
+            &mut bap,
+        );
         assert_eq!(&bap[..7], &[6; 7]);
         // snroffset(20, 8) = ((5 << 4) + 8) << 2 = 352: (1280 − 352 − 496) =
         // 432 & 0x1fe0 = 416, + 496 = 912; (1792 − 912) >> 5 = 27 → baptab[27] = 9.
-        compute_bap(&exps, 0, 7, 0, &params, fast_gain(4), snr_offset(20, 8), Kind::Lfe, None, false, &mut bap);
+        compute_bap(
+            &exps,
+            0,
+            7,
+            0,
+            &params,
+            fast_gain(4),
+            snr_offset(20, 8),
+            Kind::Lfe,
+            None,
+            false,
+            &mut bap,
+        );
         assert_eq!(&bap[..7], &[9; 7]);
         // A louder bin 0 (exponent 4, psd 2560): calc_lowcomp sees b0 > b1
         // and leaves lowcomp at 0, excite[0] = 2560 − 640 = 1920 (no dbknee
         // boost, 2560 ≥ 2304) → (1920 − 496) & 0x1fe0 = 1408, + 496 = 1904;
         // (2560 − 1904) >> 5 = 20 → baptab[20] = 7. Bins 1..7 as before.
         exps[0] = 4;
-        compute_bap(&exps, 0, 7, 0, &params, fast_gain(4), snr_offset(15, 0), Kind::Lfe, None, false, &mut bap);
+        compute_bap(
+            &exps,
+            0,
+            7,
+            0,
+            &params,
+            fast_gain(4),
+            snr_offset(15, 0),
+            Kind::Lfe,
+            None,
+            false,
+            &mut bap,
+        );
         assert_eq!(&bap[..7], &[7, 6, 6, 6, 6, 6, 6]);
     }
 
@@ -350,15 +454,49 @@ mod tests {
         let params = BaParams::from_codes(2, 1, 1, 2, 7);
         let exps = [10u8; 256];
         let mut base = [0u8; 256];
-        compute_bap(&exps, 0, 253, 0, &params, fast_gain(4), snr_offset(18, 0), Kind::Fbw, None, false, &mut base);
+        compute_bap(
+            &exps,
+            0,
+            253,
+            0,
+            &params,
+            fast_gain(4),
+            snr_offset(18, 0),
+            Kind::Fbw,
+            None,
+            false,
+            &mut base,
+        );
         // +24 dB (code 7 → delta = (7-3)<<7) on bands 30..=33 lowers the
         // allocation there and nowhere else.
-        let d = DeltaBa { nseg: 1, offst: [30, 0, 0, 0, 0, 0, 0, 0], len: [4, 0, 0, 0, 0, 0, 0, 0], ba: [7, 0, 0, 0, 0, 0, 0, 0] };
+        let d = DeltaBa {
+            nseg: 1,
+            offst: [30, 0, 0, 0, 0, 0, 0, 0],
+            len: [4, 0, 0, 0, 0, 0, 0, 0],
+            ba: [7, 0, 0, 0, 0, 0, 0, 0],
+        };
         let mut with = [0u8; 256];
-        compute_bap(&exps, 0, 253, 0, &params, fast_gain(4), snr_offset(18, 0), Kind::Fbw, Some(&d), false, &mut with);
+        compute_bap(
+            &exps,
+            0,
+            253,
+            0,
+            &params,
+            fast_gain(4),
+            snr_offset(18, 0),
+            Kind::Fbw,
+            Some(&d),
+            false,
+            &mut with,
+        );
         let lo = BNDTAB[30] as usize;
         let hi = BNDTAB[34] as usize;
-        assert!(with[lo..hi].iter().zip(&base[lo..hi]).all(|(w, b)| w < b), "{:?} vs {:?}", &with[lo..hi], &base[lo..hi]);
+        assert!(
+            with[lo..hi].iter().zip(&base[lo..hi]).all(|(w, b)| w < b),
+            "{:?} vs {:?}",
+            &with[lo..hi],
+            &base[lo..hi]
+        );
         assert_eq!(&with[..lo], &base[..lo]);
         assert_eq!(&with[hi..253], &base[hi..253]);
     }

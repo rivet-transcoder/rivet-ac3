@@ -18,7 +18,9 @@ use ac3::{FrameDecoder, frame_crc_ok, parse_header};
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
-        eprintln!("usage: ac3_decode <in.ac3|in.eac3> <out.f32le> [drc_scale=1.0] [noise_seed|off]");
+        eprintln!(
+            "usage: ac3_decode <in.ac3|in.eac3> <out.f32le> [drc_scale=1.0] [noise_seed|off]"
+        );
         std::process::exit(2);
     }
     tracing_subscriber::fmt()
@@ -26,7 +28,10 @@ fn main() {
         .with_writer(std::io::stderr)
         .without_time()
         .init();
-    let drc: f32 = args.get(3).map(|s| s.parse().expect("drc_scale")).unwrap_or(1.0);
+    let drc: f32 = args
+        .get(3)
+        .map(|s| s.parse().expect("drc_scale"))
+        .unwrap_or(1.0);
     let es = std::fs::read(&args[1]).expect("read input");
     let mut dec = FrameDecoder::new(drc);
     match args.get(4).map(String::as_str) {
@@ -56,7 +61,11 @@ fn main() {
             }
         };
         if pos + hdr.frame_len > es.len() {
-            eprintln!("frame {frames}: truncated ({} of {} bytes), dropped", es.len() - pos, hdr.frame_len);
+            eprintln!(
+                "frame {frames}: truncated ({} of {} bytes), dropped",
+                es.len() - pos,
+                hdr.frame_len
+            );
             break;
         }
         let frame = &es[pos..pos + hdr.frame_len];
@@ -86,7 +95,11 @@ fn main() {
                 d(f.vq_bins, prev_feat.vq_bins),
                 d(f.gaq_bins, prev_feat.gaq_bins),
                 d(f.gaq_large_mantissas, prev_feat.gaq_large_mantissas),
-                dec.mixed_transform_blocks().iter().filter(|&&b| b / 6 == frames as u64).map(|b| b % 6).collect::<Vec<_>>(),
+                dec.mixed_transform_blocks()
+                    .iter()
+                    .filter(|&&b| b / 6 == frames as u64)
+                    .map(|b| b % 6)
+                    .collect::<Vec<_>>(),
                 dec.dithflag_bit_offsets(),
             );
             prev_feat = f;
@@ -107,7 +120,11 @@ fn main() {
             frames,
             skipped,
             if h.eac3 { "E-AC-3" } else { "AC-3" },
-            if h.eac3 { format!(" ({} blk)", h.numblks) } else { String::new() },
+            if h.eac3 {
+                format!(" ({} blk)", h.numblks)
+            } else {
+                String::new()
+            },
             h.acmod,
             h.lfeon,
             h.channels(),

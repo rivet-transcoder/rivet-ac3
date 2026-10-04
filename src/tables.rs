@@ -61,8 +61,15 @@ pub const SYM_QUANT_3: [f32; 3] = [-2.0 / 3.0, 0.0, 2.0 / 3.0];
 /// Table 7.20 (PDF p.80): bap=2, 5-level symmetric quantiser.
 pub const SYM_QUANT_5: [f32; 5] = [-4.0 / 5.0, -2.0 / 5.0, 0.0, 2.0 / 5.0, 4.0 / 5.0];
 /// Table 7.21 (PDF p.80): bap=3, 7-level symmetric quantiser.
-pub const SYM_QUANT_7: [f32; 7] =
-    [-6.0 / 7.0, -4.0 / 7.0, -2.0 / 7.0, 0.0, 2.0 / 7.0, 4.0 / 7.0, 6.0 / 7.0];
+pub const SYM_QUANT_7: [f32; 7] = [
+    -6.0 / 7.0,
+    -4.0 / 7.0,
+    -2.0 / 7.0,
+    0.0,
+    2.0 / 7.0,
+    4.0 / 7.0,
+    6.0 / 7.0,
+];
 /// Table 7.22 (PDF p.80): bap=4, 11-level symmetric quantiser.
 pub const SYM_QUANT_11: [f32; 11] = [
     -10.0 / 11.0,
@@ -146,6 +153,7 @@ pub const FRMSIZETAB: [[u16; 3]; 38] = [
 ];
 
 /// Table 5.18 (PDF p.52): nominal bit rate in kbit/s per `frmsizecod >> 1`.
+#[rustfmt::skip]
 pub const BITRATE_KBPS: [u16; 19] =
     [32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384, 448, 512, 576, 640];
 
@@ -203,13 +211,16 @@ pub const DEFCPLBNDSTRC: [u8; 18] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1
 /// Table E3.13 (PDF p.217): first transform coefficient of each spectral
 /// extension sub-band, `spxbandtable[sbnd]`; entry 17 (= 229) is the end
 /// marker for `spxendf` = 17.
-pub const SPXBANDTABLE: [u16; 18] =
-    [25, 37, 49, 61, 73, 85, 97, 109, 121, 133, 145, 157, 169, 181, 193, 205, 217, 229];
+pub const SPXBANDTABLE: [u16; 18] = [
+    25, 37, 49, 61, 73, 85, 97, 109, 121, 133, 145, 157, 169, 181, 193, 205, 217, 229,
+];
 
 /// Table E3.2 (PDF p.197): mantissa bits per `hebap`. For hebap 1..=7 this is
 /// the VQ index width (the "(N/6)" entries); for 8..=19 the GAQ codeword
 /// length `m`. hebap 0 carries no bits.
-pub const HEBAP_MANT_BITS: [u8; 20] = [0, 2, 3, 4, 5, 7, 8, 9, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16];
+pub const HEBAP_MANT_BITS: [u8; 20] = [
+    0, 2, 3, 4, 5, 7, 8, 9, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16,
+];
 
 /// Table E3.6 (PDF p.202): large-mantissa remapping constant `a`, 16-bit
 /// two's-complement fraction, indexed `[hebap - 8][gain index]` with gain index
@@ -235,15 +246,51 @@ pub const GAQ_REMAP_A: [[i16; 3]; 12] = [
 /// `[hebap - 8][gain index][sign]` with sign 0 = x ≥ 0, 1 = x < 0. For Gk = 1
 /// `b` is 0 in both halves.
 pub const GAQ_REMAP_B: [[[i16; 2]; 3]; 12] = [
-    [[0, 0], [0x4000, 0xeaabu16 as i16], [0x2000, 0xfb6eu16 as i16]],
-    [[0, 0], [0x4000, 0xd249u16 as i16], [0x2000, 0xeccdu16 as i16]],
-    [[0, 0], [0x4000, 0xc889u16 as i16], [0x2000, 0xe632u16 as i16]],
-    [[0, 0], [0x4000, 0xc421u16 as i16], [0x2000, 0xe30cu16 as i16]],
-    [[0, 0], [0x4000, 0xc208u16 as i16], [0x2000, 0xe183u16 as i16]],
-    [[0, 0], [0x4000, 0xc102u16 as i16], [0x2000, 0xe0c1u16 as i16]],
-    [[0, 0], [0x4000, 0xc081u16 as i16], [0x2000, 0xe060u16 as i16]],
-    [[0, 0], [0x4000, 0xc040u16 as i16], [0x2000, 0xe030u16 as i16]],
-    [[0, 0], [0x4000, 0xc020u16 as i16], [0x2000, 0xe018u16 as i16]],
+    [
+        [0, 0],
+        [0x4000, 0xeaabu16 as i16],
+        [0x2000, 0xfb6eu16 as i16],
+    ],
+    [
+        [0, 0],
+        [0x4000, 0xd249u16 as i16],
+        [0x2000, 0xeccdu16 as i16],
+    ],
+    [
+        [0, 0],
+        [0x4000, 0xc889u16 as i16],
+        [0x2000, 0xe632u16 as i16],
+    ],
+    [
+        [0, 0],
+        [0x4000, 0xc421u16 as i16],
+        [0x2000, 0xe30cu16 as i16],
+    ],
+    [
+        [0, 0],
+        [0x4000, 0xc208u16 as i16],
+        [0x2000, 0xe183u16 as i16],
+    ],
+    [
+        [0, 0],
+        [0x4000, 0xc102u16 as i16],
+        [0x2000, 0xe0c1u16 as i16],
+    ],
+    [
+        [0, 0],
+        [0x4000, 0xc081u16 as i16],
+        [0x2000, 0xe060u16 as i16],
+    ],
+    [
+        [0, 0],
+        [0x4000, 0xc040u16 as i16],
+        [0x2000, 0xe030u16 as i16],
+    ],
+    [
+        [0, 0],
+        [0x4000, 0xc020u16 as i16],
+        [0x2000, 0xe018u16 as i16],
+    ],
     [[0, 0], [0, 0], [0, 0]],
     [[0, 0], [0, 0], [0, 0]],
     [[0, 0], [0, 0], [0, 0]],
@@ -271,6 +318,7 @@ pub fn vq_table(hebap: u8) -> &'static [[i16; 6]] {
 // ---------------------------------------------------------------------------
 
 /// Table 7.13 (PDF p.73): bin number -> 1/6-octave band number, `masktab[bin]`, bin = 10*A + B. 256 entries; bins 253..255 are unused and printed as 0.
+#[rustfmt::skip]
 pub const MASKTAB: [u8; 256] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
     16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 28, 28, 29,
@@ -291,6 +339,7 @@ pub const MASKTAB: [u8; 256] = [
 ];
 
 /// Table 7.14 (PDF p.74): log-addition table `latab[val]`, val = 10*A + B (256 entries).
+#[rustfmt::skip]
 pub const LATAB: [u16; 256] = [
     0x0040, 0x003f, 0x003e, 0x003d, 0x003c, 0x003b, 0x003a, 0x0039,
     0x0038, 0x0037, 0x0036, 0x0035, 0x0034, 0x0034, 0x0033, 0x0032,
@@ -328,6 +377,7 @@ pub const LATAB: [u16; 256] = [
 
 // hth[0][band]
 /// Table 7.15 (PDF p.75): hearing threshold `hth[0][band]`, fs = 48 kHz.
+#[rustfmt::skip]
 pub const HTH_0: [u16; 50] = [
     0x04d0, 0x04d0, 0x0440, 0x0400, 0x03e0, 0x03c0, 0x03b0, 0x03b0, 0x03a0, 0x03a0,
     0x03a0, 0x03a0, 0x03a0, 0x0390, 0x0390, 0x0390, 0x0380, 0x0380, 0x0370, 0x0370,
@@ -338,6 +388,7 @@ pub const HTH_0: [u16; 50] = [
 
 // hth[1][band]
 /// Table 7.15 (PDF p.75): hearing threshold `hth[1][band]`, fs = 44.1 kHz.
+#[rustfmt::skip]
 pub const HTH_1: [u16; 50] = [
     0x04f0, 0x04f0, 0x0460, 0x0410, 0x03e0, 0x03d0, 0x03c0, 0x03b0, 0x03b0, 0x03a0,
     0x03a0, 0x03a0, 0x03a0, 0x03a0, 0x0390, 0x0390, 0x0390, 0x0380, 0x0380, 0x0380,
@@ -348,6 +399,7 @@ pub const HTH_1: [u16; 50] = [
 
 // hth[2][band]
 /// Table 7.15 (PDF p.75): hearing threshold `hth[2][band]`, fs = 32 kHz.
+#[rustfmt::skip]
 pub const HTH_2: [u16; 50] = [
     0x0580, 0x0580, 0x04b0, 0x0450, 0x0420, 0x03f0, 0x03e0, 0x03d0, 0x03c0, 0x03b0,
     0x03b0, 0x03b0, 0x03a0, 0x03a0, 0x03a0, 0x03a0, 0x03a0, 0x03a0, 0x03a0, 0x03a0,
@@ -357,6 +409,7 @@ pub const HTH_2: [u16; 50] = [
 ];
 
 /// Table 7.16 (PDF p.76): bit allocation pointer table `baptab[address]` (64 entries).
+#[rustfmt::skip]
 pub const BAPTAB: [u8; 64] = [
     0, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 5, 5, 6,
     6, 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9, 10,
@@ -369,6 +422,7 @@ pub const BAPTAB: [u8; 64] = [
 // (A=13, B=7) as 0.78530; π/4 = 0.785398… is 0.78540 at the table's five
 // decimals. A window sample, not π/4: it stays exactly as printed.
 #[allow(clippy::approx_constant)]
+#[rustfmt::skip]
 pub const WINDOW_TABLE: [f32; 256] = [
     0.00014, 0.00024, 0.00037, 0.00051, 0.00067, 0.00086, 0.00107, 0.00130,
     0.00157, 0.00187, 0.00220, 0.00256, 0.00297, 0.00341, 0.00390, 0.00443,
@@ -405,6 +459,7 @@ pub const WINDOW_TABLE: [f32; 256] = [
 ];
 
 /// Table E3.1 (PDF p.196): high-efficiency bit allocation pointers `hebaptab[address]` (64 entries).
+#[rustfmt::skip]
 pub const HEBAPTAB: [u8; 64] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 8, 8, 8, 9, 9, 9, 10,
     10, 10, 10, 11, 11, 11, 11, 12, 12, 12, 12, 13, 13, 13, 13, 14,
@@ -1434,7 +1489,6 @@ pub const VQ_HEBAP_7: [[i16; 6]; 512] = [
     [3231, -3284, 27336, 4174, -1683, 497],
 ];
 
-
 // ---------------------------------------------------------------------------
 // Checksum tests: length, sum and spot values re-read from the rendered page.
 // ---------------------------------------------------------------------------
@@ -1462,7 +1516,11 @@ mod tests {
         assert_eq!(BNDTAB.len(), 50);
         assert_eq!(BNDSZ.len(), 50);
         for i in 0..49 {
-            assert_eq!(BNDTAB[i] as u16 + BNDSZ[i] as u16, BNDTAB[i + 1] as u16, "band {i}");
+            assert_eq!(
+                BNDTAB[i] as u16 + BNDSZ[i] as u16,
+                BNDTAB[i + 1] as u16,
+                "band {i}"
+            );
         }
         assert_eq!(BNDTAB[49] as u16 + BNDSZ[49] as u16, 253);
         assert_eq!(sum_u(&BNDSZ), 253);
@@ -1492,7 +1550,10 @@ mod tests {
         assert_eq!(LATAB.len(), 256);
         assert_eq!(sum_u(&LATAB), 3414);
         // PDF p.74: first row 0x40 0x3f … 0x37; A=4 B=0 = 0x20; A=10 B=1 = 0x09; A=17 B=8 = A=20 B=9 = 0x01; A=21.. = 0.
-        assert_eq!(&LATAB[..10], &[0x40, 0x3f, 0x3e, 0x3d, 0x3c, 0x3b, 0x3a, 0x39, 0x38, 0x37]);
+        assert_eq!(
+            &LATAB[..10],
+            &[0x40, 0x3f, 0x3e, 0x3d, 0x3c, 0x3b, 0x3a, 0x39, 0x38, 0x37]
+        );
         assert_eq!(LATAB[40], 0x20);
         assert_eq!(LATAB[101], 0x09);
         assert_eq!(LATAB[178], 0x01);
@@ -1527,7 +1588,10 @@ mod tests {
         assert_eq!(BAPTAB.len(), 64);
         assert_eq!(sum_u(&BAPTAB), 587);
         // PDF p.76: 0,1,1,1,1,1,2,2,3,3,3,4,4,5,5,6,6,6,6,7…; 31 → 10; 47 → 14; 55..=63 → 15.
-        assert_eq!(&BAPTAB[..19], &[0, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 5, 5, 6, 6, 6, 6]);
+        assert_eq!(
+            &BAPTAB[..19],
+            &[0, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3, 4, 4, 5, 5, 6, 6, 6, 6]
+        );
         assert_eq!(BAPTAB[31], 10);
         assert_eq!(BAPTAB[47], 14);
         assert!(BAPTAB[55..].iter().all(|&b| b == 15));
@@ -1575,7 +1639,11 @@ mod tests {
             assert_eq!(u32::from(row[2]), kbps * 3, "32 kHz code {code}");
             // 44.1 kHz: kbps·1000·1536/44100/16 words, floor for even codes, +1 for odd.
             let words = (kbps as f64 * 1000.0 * 1536.0 / 44100.0 / 16.0).floor() as u32;
-            assert_eq!(u32::from(row[1]), words + (code as u32 & 1), "44.1 kHz code {code}");
+            assert_eq!(
+                u32::from(row[1]),
+                words + (code as u32 & 1),
+                "44.1 kHz code {code}"
+            );
         }
         assert_eq!(FRMSIZETAB[37], [1280, 1394, 1920]);
     }
@@ -1604,8 +1672,14 @@ mod tests {
         }
         assert_eq!(SPXBANDTABLE[0], 25);
         assert_eq!(SPXBANDTABLE[17], 229);
-        assert_eq!(DEFSPXBNDSTRC, [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]);
-        assert_eq!(DEFCPLBNDSTRC, [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1]);
+        assert_eq!(
+            DEFSPXBNDSTRC,
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+        );
+        assert_eq!(
+            DEFCPLBNDSTRC,
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1]
+        );
         let sum: f64 = SPXATTENTAB.iter().flatten().map(|&v| f64::from(v)).sum();
         assert!((sum - 32.761591).abs() < 1e-4, "{sum}");
         // PDF p.223 spot values, and the closed form every entry obeys.
@@ -1623,7 +1697,12 @@ mod tests {
 
     #[test]
     fn gaq_tables_e3_2_and_e3_6() {
-        assert_eq!(HEBAP_MANT_BITS, [0, 2, 3, 4, 5, 7, 8, 9, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16]);
+        assert_eq!(
+            HEBAP_MANT_BITS,
+            [
+                0, 2, 3, 4, 5, 7, 8, 9, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 16
+            ]
+        );
         // PDF p.202 spot values.
         assert_eq!(GAQ_REMAP_A[0], [0x1249, 0xd555u16 as i16, 0xedb7u16 as i16]);
         assert_eq!(GAQ_REMAP_B[0][1], [0x4000, 0xeaabu16 as i16]);
@@ -1636,12 +1715,16 @@ mod tests {
             let m = f64::from(HEBAP_MANT_BITS[h]);
             let expect = 2f64.powf(m) / (2f64.powf(m) - 1.0) - 1.0;
             let got = f64::from(GAQ_REMAP_A[h - 8][0]) / 32768.0;
-            assert!((got - expect).abs() < 1.0 / 32768.0, "hebap {h}: {got} vs {expect}");
+            assert!(
+                (got - expect).abs() < 1.0 / 32768.0,
+                "hebap {h}: {got} vs {expect}"
+            );
         }
     }
 
     #[test]
     fn vq_codebooks_e4_1_to_e4_7() {
+        #[rustfmt::skip]
         let expect: [(usize, i64, [i16; 6], [i16; 6]); 7] = [
             (4, 3393, [7167, 4739, 1106, 4269, 10412, 4820], [-1468, -7031, 7592, 10617, -5946, -3062]),
             (8, -3230, [-12073, 608, -7019, 590, 4000, 869], [3753, -1066, 4283, -3227, 15928, 10186]),
@@ -1661,7 +1744,17 @@ mod tests {
             assert_eq!(t[t.len() - 1], *last, "hebap {} last", h + 1);
         }
         // PDF p.234: E4.1 row 3 = 0xfa44 0xe489 0x1da8 0x2979 0xe8c6 0xf40a.
-        assert_eq!(VQ_HEBAP_1[3], [0xfa44u16 as i16, 0xe489u16 as i16, 0x1da8, 0x2979, 0xe8c6u16 as i16, 0xf40au16 as i16]);
+        assert_eq!(
+            VQ_HEBAP_1[3],
+            [
+                0xfa44u16 as i16,
+                0xe489u16 as i16,
+                0x1da8,
+                0x2979,
+                0xe8c6u16 as i16,
+                0xf40au16 as i16
+            ]
+        );
         assert!(vq_table(0).is_empty() && vq_table(8).is_empty());
     }
 

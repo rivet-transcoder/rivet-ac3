@@ -104,9 +104,18 @@ fn ifft(buf: &mut [C]) {
                 let (s, c) = tw[k];
                 let a = buf[start + k];
                 let b = buf[start + k + size / 2];
-                let t = C { re: b.re * c - b.im * s, im: b.re * s + b.im * c };
-                buf[start + k] = C { re: a.re + t.re, im: a.im + t.im };
-                buf[start + k + size / 2] = C { re: a.re - t.re, im: a.im - t.im };
+                let t = C {
+                    re: b.re * c - b.im * s,
+                    im: b.re * s + b.im * c,
+                };
+                buf[start + k] = C {
+                    re: a.re + t.re,
+                    im: a.im + t.im,
+                };
+                buf[start + k + size / 2] = C {
+                    re: a.re - t.re,
+                    im: a.im - t.im,
+                };
             }
         }
         size *= 2;
@@ -125,7 +134,12 @@ struct Twiddles {
 fn twiddles() -> &'static Twiddles {
     static T: OnceLock<Twiddles> = OnceLock::new();
     T.get_or_init(|| {
-        let mut t = Twiddles { cos1: [0.0; 128], sin1: [0.0; 128], cos2: [0.0; 64], sin2: [0.0; 64] };
+        let mut t = Twiddles {
+            cos1: [0.0; 128],
+            sin1: [0.0; 128],
+            cos2: [0.0; 64],
+            sin2: [0.0; 64],
+        };
         for k in 0..128 {
             let a = 2.0 * PI * (8.0 * k as f64 + 1.0) / (8.0 * N as f64);
             t.cos1[k] = -a.cos();
@@ -145,7 +159,12 @@ fn twiddles() -> &'static Twiddles {
 /// `coeffs` are the 256 transform coefficients; `delay` is the channel's
 /// overlap-add memory (the second half of the previous windowed block).
 /// Writes 256 PCM samples to `out` and updates `delay`.
-pub(super) fn imdct_block(coeffs: &[f32; 256], blksw: bool, delay: &mut [f32; 256], out: &mut [f32; 256]) {
+pub(super) fn imdct_block(
+    coeffs: &[f32; 256],
+    blksw: bool,
+    delay: &mut [f32; 256],
+    out: &mut [f32; 256],
+) {
     let w = kbd_window();
     let tw = twiddles();
     let mut x = [0.0f64; N];
@@ -191,8 +210,14 @@ pub(super) fn imdct_block(coeffs: &[f32; 256], blksw: bool, delay: &mut [f32; 25
         for k in 0..N / 8 {
             let (a1, b1) = (x1[N / 4 - 2 * k - 1], x1[2 * k]);
             let (a2, b2) = (x2[N / 4 - 2 * k - 1], x2[2 * k]);
-            z1[k] = C { re: a1 * tw.cos2[k] - b1 * tw.sin2[k], im: b1 * tw.cos2[k] + a1 * tw.sin2[k] };
-            z2[k] = C { re: a2 * tw.cos2[k] - b2 * tw.sin2[k], im: b2 * tw.cos2[k] + a2 * tw.sin2[k] };
+            z1[k] = C {
+                re: a1 * tw.cos2[k] - b1 * tw.sin2[k],
+                im: b1 * tw.cos2[k] + a1 * tw.sin2[k],
+            };
+            z2[k] = C {
+                re: a2 * tw.cos2[k] - b2 * tw.sin2[k],
+                im: b2 * tw.cos2[k] + a2 * tw.sin2[k],
+            };
         }
         ifft(&mut z1);
         ifft(&mut z2);
@@ -249,7 +274,10 @@ mod tests {
     fn radix2_ifft_matches_the_direct_sum() {
         for &len in &[64usize, 128] {
             let z: Vec<C> = (0..len)
-                .map(|i| C { re: ((i * 7) % 13) as f64 - 6.0, im: ((i * 5) % 11) as f64 - 5.0 })
+                .map(|i| C {
+                    re: ((i * 7) % 13) as f64 - 6.0,
+                    im: ((i * 5) % 11) as f64 - 5.0,
+                })
                 .collect();
             let slow = slow_ifft(&z);
             let mut fast = z.clone();
@@ -293,7 +321,10 @@ mod tests {
         let r2 = rms(&blocks[2]);
         let r3 = rms(&blocks[3]);
         assert!(r1 > 0.01, "tone must come out: {r1}");
-        assert!((r1 - r2).abs() < 1e-3 * r1 && (r2 - r3).abs() < 1e-3 * r2, "{r1} {r2} {r3}");
+        assert!(
+            (r1 - r2).abs() < 1e-3 * r1 && (r2 - r3).abs() < 1e-3 * r2,
+            "{r1} {r2} {r3}"
+        );
         // Bin k of a 512-MDCT is a cosine at (k + 0.5) cycles per 512 samples;
         // one 256-sample block advances it by (k+0.5)π. For k = 10 that is an
         // odd multiple of π/2 … so check continuity at the block seam instead:

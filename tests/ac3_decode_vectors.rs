@@ -72,7 +72,10 @@ fn compare(ours: &[f32], reference: &[f32], channels: usize, masked: &[u64]) -> 
     }
     Stats {
         channels,
-        rms: rms.iter().map(|s| (s / counted.max(1) as f64).sqrt() as f32).collect(),
+        rms: rms
+            .iter()
+            .map(|s| (s / counted.max(1) as f64).sqrt() as f32)
+            .collect(),
         peak,
         compared: counted,
         masked_blocks,
@@ -81,12 +84,22 @@ fn compare(ours: &[f32], reference: &[f32], channels: usize, masked: &[u64]) -> 
 
 fn read_f32le(path: &Path) -> Vec<f32> {
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    bytes.as_chunks::<4>().0.iter().map(|&c| f32::from_le_bytes(c)).collect()
+    bytes
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|&c| f32::from_le_bytes(c))
+        .collect()
 }
 
 fn read_s16le(path: &Path) -> Vec<f32> {
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    bytes.as_chunks::<2>().0.iter().map(|&c| f32::from(i16::from_le_bytes(c)) / 32768.0).collect()
+    bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&c| f32::from(i16::from_le_bytes(c)) / 32768.0)
+        .collect()
 }
 
 struct Decoded {
@@ -138,8 +151,14 @@ fn decode_es(es: &[u8], drc_scale: f32, noise_fill: bool) -> Decoded {
             break;
         }
         let frame = &es[pos..pos + hdr.frame_len];
-        assert!(frame_crc_ok(frame), "frame {frames}: CRC-16 remainder is not zero");
-        if let Some(h) = dec.decode(frame, &mut pcm).unwrap_or_else(|e| panic!("frame {frames}: {e}")) {
+        assert!(
+            frame_crc_ok(frame),
+            "frame {frames}: CRC-16 remainder is not zero"
+        );
+        if let Some(h) = dec
+            .decode(frame, &mut pcm)
+            .unwrap_or_else(|e| panic!("frame {frames}: {e}"))
+        {
             channels = h.channels();
         }
         frames += 1;
@@ -170,10 +189,17 @@ fn noise_floor(es: &[u8], drc_scale: f32, ours: &Decoded) -> Stats {
 fn report(name: &str, s: &Stats) -> String {
     let mut line = format!("{name}: {} samples/ch, {} ch;", s.compared, s.channels);
     if s.masked_blocks > 0 {
-        line.push_str(&format!(" {} mixed-transform blocks masked;", s.masked_blocks));
+        line.push_str(&format!(
+            " {} mixed-transform blocks masked;",
+            s.masked_blocks
+        ));
     }
     for c in 0..s.channels {
-        line.push_str(&format!(" ch{c} rms={:.3} peak={:.2} LSB16;", s.rms[c] / LSB16, s.peak[c] / LSB16));
+        line.push_str(&format!(
+            " ch{c} rms={:.3} peak={:.2} LSB16;",
+            s.rms[c] / LSB16,
+            s.peak[c] / LSB16
+        ));
     }
     line
 }
@@ -200,8 +226,18 @@ fn check(name: &str, s: &Stats, noise: &Stats, d: &Decoded) {
     let mut line = report(name, s);
     line.push_str(&format!(
         " noise rms={} peak={} LSB16; dithered {}/{} bins; dynrng blocks {}/{}; features: {}",
-        noise.rms.iter().map(|f| format!("{:.3}", f / LSB16)).collect::<Vec<_>>().join("/"),
-        noise.peak.iter().map(|f| format!("{:.2}", f / LSB16)).collect::<Vec<_>>().join("/"),
+        noise
+            .rms
+            .iter()
+            .map(|f| format!("{:.3}", f / LSB16))
+            .collect::<Vec<_>>()
+            .join("/"),
+        noise
+            .peak
+            .iter()
+            .map(|f| format!("{:.2}", f / LSB16))
+            .collect::<Vec<_>>()
+            .join("/"),
         d.dithered.0,
         d.dithered.1,
         d.drc.0,
@@ -226,11 +262,23 @@ fn check(name: &str, s: &Stats, noise: &Stats, d: &Decoded) {
         );
         let ok = s.rms[c] <= rms_limit && s.peak[c] <= peak_limit;
         if report_only && !ok {
-            println!("  ch{c} OVER: rms limit {:.3}, peak limit {:.3} LSB16", rms_limit / LSB16, peak_limit / LSB16);
+            println!(
+                "  ch{c} OVER: rms limit {:.3}, peak limit {:.3} LSB16",
+                rms_limit / LSB16,
+                peak_limit / LSB16
+            );
             continue;
         }
-        assert!(s.rms[c] <= rms_limit, "{line}\n  ch{c} RMS over {:.3} LSB16", rms_limit / LSB16);
-        assert!(s.peak[c] <= peak_limit, "{line}\n  ch{c} peak over {:.3} LSB16", peak_limit / LSB16);
+        assert!(
+            s.rms[c] <= rms_limit,
+            "{line}\n  ch{c} RMS over {:.3} LSB16",
+            rms_limit / LSB16
+        );
+        assert!(
+            s.peak[c] <= peak_limit,
+            "{line}\n  ch{c} peak over {:.3} LSB16",
+            peak_limit / LSB16
+        );
     }
 }
 
@@ -238,7 +286,11 @@ fn check(name: &str, s: &Stats, noise: &Stats, d: &Decoded) {
 /// `RIVET_AC3_MASK_MIXED` is set, none otherwise (liba52 follows §7.9.4
 /// there, so by default they are compared like every other block).
 fn mask(d: &Decoded) -> &[u64] {
-    if std::env::var_os("RIVET_AC3_MASK_MIXED").is_some() { &d.mixed_blocks } else { &[] }
+    if std::env::var_os("RIVET_AC3_MASK_MIXED").is_some() {
+        &d.mixed_blocks
+    } else {
+        &[]
+    }
 }
 
 /// The committed fixture: 250 ms of 5.1 AC-3 at 448 kbit/s from aften (block
@@ -251,9 +303,17 @@ fn committed_5_1_fixture_matches_liba52() {
     let reference = read_s16le(&dir.join("aften_51_448k.liba52.s16le"));
     let ours = decode_es(&es, 1.0, true);
     assert_eq!(ours.channels, 6);
-    assert!(ours.frames >= 7, "expected ≥ 7 syncframes, got {}", ours.frames);
+    assert!(
+        ours.frames >= 7,
+        "expected ≥ 7 syncframes, got {}",
+        ours.frames
+    );
     assert!(ours.drc.0 > 0, "the fixture should carry dynrng words");
-    assert_eq!(ours.pcm.len(), reference.len(), "sample count differs from liba52");
+    assert_eq!(
+        ours.pcm.len(),
+        reference.len(),
+        "sample count differs from liba52"
+    );
     let s = compare(&ours.pcm, &reference, 6, mask(&ours));
     let noise = noise_floor(&es, 1.0, &ours);
     // The reference is 16-bit, so its own rounding contributes up to 0.5 LSB16.
@@ -274,8 +334,22 @@ fn stream_decoder_reassembles_split_frames() {
         for f in dec.decode(chunk).unwrap() {
             assert_eq!(f.channels, 6);
             assert_eq!(f.sample_rate, 48_000);
-            assert_eq!(f.samples.len(), 1536 * 6, "one syncframe is 1536 samples per channel");
-            assert_eq!(f.speakers(), [ac3::Speaker::FL, ac3::Speaker::FR, ac3::Speaker::FC, ac3::Speaker::LFE, ac3::Speaker::SL, ac3::Speaker::SR]);
+            assert_eq!(
+                f.samples.len(),
+                1536 * 6,
+                "one syncframe is 1536 samples per channel"
+            );
+            assert_eq!(
+                f.speakers(),
+                [
+                    ac3::Speaker::FL,
+                    ac3::Speaker::FR,
+                    ac3::Speaker::FC,
+                    ac3::Speaker::LFE,
+                    ac3::Speaker::SL,
+                    ac3::Speaker::SR
+                ]
+            );
             frames += 1;
             out.extend_from_slice(&f.samples);
         }
@@ -289,7 +363,9 @@ fn stream_decoder_reassembles_split_frames() {
 /// `RIVET_AC3_VECTORS`, or `None` (with a message) when it is not set —
 /// a failure instead when `RIVET_AC3_REQUIRE_VECTORS` is set.
 fn vectors_dir() -> Option<PathBuf> {
-    let dir = std::env::var_os("RIVET_AC3_VECTORS").map(PathBuf::from).filter(|d| d.is_dir());
+    let dir = std::env::var_os("RIVET_AC3_VECTORS")
+        .map(PathBuf::from)
+        .filter(|d| d.is_dir());
     if dir.is_none() {
         assert!(
             std::env::var_os("RIVET_AC3_REQUIRE_VECTORS").is_none(),
@@ -302,10 +378,17 @@ fn vectors_dir() -> Option<PathBuf> {
 }
 
 fn streams_in(dir: &Path) -> Vec<PathBuf> {
-    let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
     let mut names: Vec<PathBuf> = rd
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| matches!(p.extension().and_then(|e| e.to_str()), Some("ac3" | "eac3" | "ec3")))
+        .filter(|p| {
+            matches!(
+                p.extension().and_then(|e| e.to_str()),
+                Some("ac3" | "eac3" | "ec3")
+            )
+        })
         .collect();
     names.sort();
     names
@@ -331,8 +414,15 @@ fn vector_sweep_matches_liba52() {
             }
             let reference = read_f32le(&ref_path);
             let ours = decode_es(&es, drc, true);
-            assert!(!ours.truncated_tail, "{stem}: the stream ends inside a syncframe");
-            assert_eq!(ours.pcm.len(), reference.len(), "{stem}: sample count differs from liba52");
+            assert!(
+                !ours.truncated_tail,
+                "{stem}: the stream ends inside a syncframe"
+            );
+            assert_eq!(
+                ours.pcm.len(),
+                reference.len(),
+                "{stem}: sample count differs from liba52"
+            );
             let s = compare(&ours.pcm, &reference, ours.channels, mask(&ours));
             let noise = noise_floor(&es, drc, &ours);
             let name = format!("{stem}.{tag}");
@@ -352,7 +442,11 @@ fn vector_sweep_matches_liba52() {
             ));
         }
     }
-    assert!(checked > 0, "no stream with a liba52 reference in {}", dir.display());
+    assert!(
+        checked > 0,
+        "no stream with a liba52 reference in {}",
+        dir.display()
+    );
     // A summary the report can quote.
     std::fs::write(dir.join("ac3_sweep_report.txt"), lines.join("\n") + "\n").unwrap();
 }
@@ -377,14 +471,22 @@ fn dolby_dir() -> Option<PathBuf> {
 fn dolby_kit_streams_decode_clean() {
     let Some(dir) = dolby_dir() else { return };
     let names = streams_in(&dir);
-    assert!(names.len() >= 10, "expected the kit's 12 AC-3 / E-AC-3 streams, found {}", names.len());
+    assert!(
+        names.len() >= 10,
+        "expected the kit's 12 AC-3 / E-AC-3 streams, found {}",
+        names.len()
+    );
     for path in &names {
         let name = path.file_name().unwrap().to_string_lossy().to_string();
         let d = decode_es(&std::fs::read(path).unwrap(), 1.0, true);
         let want = if name.contains("_2ch_") { 2 } else { 6 };
         assert_eq!(d.channels, want, "{name}: channels");
         assert!(!d.truncated_tail, "{name}: ends inside a syncframe");
-        assert_eq!(d.pcm.len(), d.frames * 1536 * want, "{name}: 1536 samples per channel per syncframe");
+        assert_eq!(
+            d.pcm.len(),
+            d.frames * 1536 * want,
+            "{name}: 1536 samples per channel per syncframe"
+        );
         println!("{name}: {} frames; features: {}", d.frames, d.features);
     }
 }
@@ -430,10 +532,14 @@ fn fft(re: &mut [f64], im: &mut [f64]) {
 fn band_energy(pcm: &[f32], channels: usize, c: usize, edges: &[f64]) -> Vec<f64> {
     const N: usize = 4096;
     let frames = pcm.len() / channels / N;
-    let window: Vec<f64> = (0..N).map(|i| 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / N as f64).cos()).collect();
+    let window: Vec<f64> = (0..N)
+        .map(|i| 0.5 - 0.5 * (2.0 * std::f64::consts::PI * i as f64 / N as f64).cos())
+        .collect();
     let mut power = vec![0.0f64; N / 2 + 1];
     for f in 0..frames {
-        let mut re: Vec<f64> = (0..N).map(|i| f64::from(pcm[(f * N + i) * channels + c]) * window[i]).collect();
+        let mut re: Vec<f64> = (0..N)
+            .map(|i| f64::from(pcm[(f * N + i) * channels + c]) * window[i])
+            .collect();
         let mut im = vec![0.0f64; N];
         fft(&mut re, &mut im);
         for (k, p) in power.iter_mut().enumerate() {
@@ -478,27 +584,45 @@ fn db(x: f64) -> f64 {
 #[test]
 fn dolby_eac3_matches_dolby_ac3_of_same_programme() {
     let Some(dir) = dolby_dir() else { return };
-    let eac3 = decode_es(&std::fs::read(dir.join("ChID_voices_6ch_256kbps_ddp.ec3")).unwrap(), 0.0, true);
+    let eac3 = decode_es(
+        &std::fs::read(dir.join("ChID_voices_6ch_256kbps_ddp.ec3")).unwrap(),
+        0.0,
+        true,
+    );
     let h = eac3.header.expect("header");
     assert!(h.acmod == 7 && h.lfeon, "5.1 expected");
     let f = &eac3.features;
-    assert!(f.spx_blocks > 0 && f.aht_channels > 0 && f.gaq_channels > 0, "the stream should exercise SPX, AHT and GAQ: {f}");
+    assert!(
+        f.spx_blocks > 0 && f.aht_channels > 0 && f.gaq_channels > 0,
+        "the stream should exercise SPX, AHT and GAQ: {f}"
+    );
     let reference = read_f32le(&dir.join("ChID_voices_6ch_640kbps_dd.drc0.f32"));
     let n = (eac3.pcm.len().min(reference.len())) / 6;
-    assert!(eac3.pcm.len().abs_diff(reference.len()) <= 1536 * 6, "lengths differ by more than a frame");
+    assert!(
+        eac3.pcm.len().abs_diff(reference.len()) <= 1536 * 6,
+        "lengths differ by more than a frame"
+    );
     let (ours, theirs) = (&eac3.pcm[..n * 6], &reference[..n * 6]);
 
     // Alignment, on the first ten seconds of the front left.
     let span = (10 * 48_000).min(n - 2048);
     let xcorr = |lag: isize| -> f64 {
-        (2048..span).map(|i| f64::from(ours[i * 6]) * f64::from(theirs[(i as isize + lag) as usize * 6])).sum()
+        (2048..span)
+            .map(|i| f64::from(ours[i * 6]) * f64::from(theirs[(i as isize + lag) as usize * 6]))
+            .sum()
     };
     let at0 = xcorr(0);
     for lag in [-1536, -512, -256, -1, 1, 256, 512, 1024] {
-        assert!(at0 > xcorr(lag), "cross-correlation at lag {lag} beats lag 0");
+        assert!(
+            at0 > xcorr(lag),
+            "cross-correlation at lag {lag} beats lag 0"
+        );
     }
 
-    let edges = [0.0, 250.0, 500.0, 1000.0, 2000.0, 3000.0, 4000.0, 6000.0, 8000.0, 10000.0, 12000.0, 14000.0, 16000.0];
+    let edges = [
+        0.0, 250.0, 500.0, 1000.0, 2000.0, 3000.0, 4000.0, 6000.0, 8000.0, 10000.0, 12000.0,
+        14000.0, 16000.0,
+    ];
     for c in 0..6 {
         let (mut sig, mut err, mut e_ours) = (0.0f64, 0.0f64, 0.0f64);
         for i in 0..n {
@@ -514,16 +638,32 @@ fn dolby_eac3_matches_dolby_ac3_of_same_programme() {
         let level = db(e_ours / sig);
         println!(
             "ch{c}: SNR {snr:.1} dB, level {level:+.2} dB, bands {}",
-            bands.iter().map(|b| format!("{b:+.1}")).collect::<Vec<_>>().join(" ")
+            bands
+                .iter()
+                .map(|b| format!("{b:+.1}"))
+                .collect::<Vec<_>>()
+                .join(" ")
         );
         if c == 3 {
-            assert!(bands[0].abs() <= 1.5, "LFE below 250 Hz off by {:.2} dB", bands[0]);
+            assert!(
+                bands[0].abs() <= 1.5,
+                "LFE below 250 Hz off by {:.2} dB",
+                bands[0]
+            );
             continue;
         }
-        assert!(snr >= 15.0, "ch{c}: SNR {snr:.1} dB against the AC-3 encode");
+        assert!(
+            snr >= 15.0,
+            "ch{c}: SNR {snr:.1} dB against the AC-3 encode"
+        );
         assert!(level.abs() <= 0.5, "ch{c}: level off by {level:.2} dB");
         for (b, d) in bands.iter().enumerate() {
-            assert!(d.abs() <= 3.0, "ch{c}: band {}–{} Hz off by {d:.2} dB", edges[b], edges[b + 1]);
+            assert!(
+                d.abs() <= 3.0,
+                "ch{c}: band {}–{} Hz off by {d:.2} dB",
+                edges[b],
+                edges[b + 1]
+            );
         }
     }
 }
